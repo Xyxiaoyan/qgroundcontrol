@@ -106,8 +106,7 @@
         {
             "name": "Mock Link",
             "qml": "MockLink.qml",
-            "icon": "qrc:/InstrumentValueIcons/drone.svg",
-            "visible": "ScreenTools.isDebug"
+            "icon": "qrc:/InstrumentValueIcons/drone.svg"
         },
         {
             "name": "Debug",

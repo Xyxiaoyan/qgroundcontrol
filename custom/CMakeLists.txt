@@ -1,0 +1,15 @@
+# DJI Fly Custom Build CMakeLists.txt
+message(STATUS "QGC: DJI Fly Custom Build")
+
+# Add custom Qt resources (AgentPanel.qml, etc.)
+list(APPEND CUSTOM_RESOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/custom.qrc
+)
+set(QGC_RESOURCES ${QGC_RESOURCES} ${CUSTOM_RESOURCES} CACHE STRING "Paths to .qrc Resources" FORCE)
+
+# No C++ custom plugin - UI-only customization
+set(CUSTOM_LIBRARIES "" CACHE INTERNAL "" FORCE)
+set(CUSTOM_SOURCES "" CACHE INTERNAL "" FORCE)
+set(CUSTOM_INCLUDE_DIRECTORIES "" CACHE INTERNAL "" FORCE)
+set(CUSTOM_DEFINITIONS QT_DEBUG CACHE INTERNAL "" FORCE)
+set(CUSTOM_QT_COMPONENTS "" CACHE INTERNAL "" FORCE)

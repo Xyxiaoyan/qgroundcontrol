@@ -144,9 +144,9 @@
     },
     {
       "args": [
-        "${workspaceFolder}/tools/translations/qgc_lupdate.py"
+        "${workspaceFolder}/tools/translations/qgc-lupdate.sh"
       ],
-      "command": "python3",
+      "command": "source",
       "group": "none",
       "label": "Update Translations",
       "problemMatcher": [],

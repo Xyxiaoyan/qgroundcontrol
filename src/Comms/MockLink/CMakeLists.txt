@@ -1,6 +1,4 @@
-if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-    return()
-endif()
+# MockLink always available for development/testing
 
 target_sources(${CMAKE_PROJECT_NAME}
     PRIVATE

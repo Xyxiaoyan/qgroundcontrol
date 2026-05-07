@@ -119,13 +119,24 @@ Item {
             visible:                !QGroundControl.videoManager.fullScreen
         }
 
-        FlyViewCustomLayer {
+        Loader {
             id:                 customOverlay
             anchors.fill:       widgetLayer
             z:                  _fullItemZorder + 2
-            parentToolInsets:   widgetLayer.totalToolInsets
-            mapControl:         _mapControl
             visible:            !QGroundControl.videoManager.fullScreen
+            source:             "qrc:/Custom/qml/QGroundControl/FlyView/CustomOverlay.qml"
+
+            onLoaded: {
+                console.log("CustomOverlay loaded successfully, item:", item)
+            }
+
+            onStatusChanged: {
+                if (status === Loader.Error) {
+                    console.log("CustomOverlay load FAILED:", sourceComponent ? "component error" : "source error")
+                } else if (status === Loader.Ready) {
+                    console.log("CustomOverlay status: Ready")
+                }
+            }
         }
 
         // Development tool for visualizing the insets for a paticular layer, show if needed

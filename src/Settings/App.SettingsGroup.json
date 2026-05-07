@@ -380,6 +380,53 @@
             "default": true,
             "label": "Elapsed Timestamps",
             "keywords": "log,time,elapsed,timestamp,console"
+        },
+        {
+            "name": "remoteLoggingCompressionEnabled",
+            "shortDesc": "Enable log compression",
+            "longDesc": "Compress log messages before sending to the remote endpoint.",
+            "type": "bool",
+            "default": false,
+            "label": "Remote Log Compression",
+            "keywords": "remote,logging,compression"
+        },
+        {
+            "name": "remoteLoggingCompressionLevel",
+            "shortDesc": "Compression level",
+            "longDesc": "zlib compression level (1=fast, 6=default, 9=best).",
+            "type": "uint8",
+            "default": 6,
+            "min": 1,
+            "max": 9,
+            "label": "Compression Level",
+            "keywords": "remote,logging,compression"
+        },
+        {
+            "name": "agentApiKey",
+            "shortDesc": "API key for the onboard AI assistant (DeepSeek, Qwen, GLM, etc.)",
+            "longDesc": "OpenAI-compatible API key for the built-in AI debugging agent.",
+            "type": "string",
+            "default": "",
+            "label": "AI Agent API Key",
+            "keywords": "ai,agent,api key,deepseek,qwen,llm"
+        },
+        {
+            "name": "agentApiEndpoint",
+            "shortDesc": "API endpoint URL for the AI assistant.",
+            "longDesc": "OpenAI-compatible chat completions endpoint for the AI agent.",
+            "type": "string",
+            "default": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+            "label": "AI Agent Endpoint",
+            "keywords": "ai,agent,endpoint,url"
+        },
+        {
+            "name": "agentModel",
+            "shortDesc": "Model name for the AI assistant.",
+            "longDesc": "Model identifier for the AI agent (qwen-plus, deepseek-chat, etc.).",
+            "type": "string",
+            "default": "qwen-plus",
+            "label": "AI Agent Model",
+            "keywords": "ai,agent,model,qwen,deepseek"
         }
     ]
 }

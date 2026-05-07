@@ -78,13 +78,13 @@ public:
     bool parameterExists(int componentId, const QString &paramName) const;
 
     /// Returns all parameter names
-    QStringList parameterNames(int componentId) const;
+    Q_INVOKABLE QStringList parameterNames(int componentId) const;
 
     /// Returns the specified Parameter. Returns a default empty fact is parameter does not exists. Also will pop
     /// a missing parameter error to user if parameter does not exist.
     ///     @param componentId: Component id or ParameterManager::defaultComponentId
     ///     @param name: Parameter name
-    Fact *getParameter(int componentId, const QString &paramName);
+    Q_INVOKABLE Fact *getParameter(int componentId, const QString &paramName);
 
     void writeParametersToStream(QTextStream &stream) const;
 

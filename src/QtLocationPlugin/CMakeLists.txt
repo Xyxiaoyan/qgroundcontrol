@@ -13,6 +13,8 @@ qt_add_plugin(QGCLocation
     Providers/ElevationMapProvider.h
     Providers/EsriMapProvider.cpp
     Providers/EsriMapProvider.h
+    Providers/GaoDeProvider.cpp
+    Providers/GaoDeProvider.h
     Providers/GenericMapProvider.cpp
     Providers/GenericMapProvider.h
     Providers/GoogleMapProvider.cpp

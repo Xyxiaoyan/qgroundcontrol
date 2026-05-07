@@ -54,6 +54,18 @@ public:
     DEFINE_SETTINGFACT(firstRunPromptIdsShown)
     DEFINE_SETTINGFACT(favoriteParameters)
     DEFINE_SETTINGFACT(showAppLogTimestampAsElapsedTime)
+    DEFINE_SETTINGFACT(remoteLoggingEnabled)
+    DEFINE_SETTINGFACT(remoteLoggingHost)
+    DEFINE_SETTINGFACT(remoteLoggingPort)
+    DEFINE_SETTINGFACT(remoteLoggingProtocol)
+    DEFINE_SETTINGFACT(remoteLoggingVehicleId)
+    DEFINE_SETTINGFACT(remoteLoggingTlsEnabled)
+    DEFINE_SETTINGFACT(remoteLoggingTlsVerifyPeer)
+    DEFINE_SETTINGFACT(remoteLoggingCompressionEnabled)
+    DEFINE_SETTINGFACT(remoteLoggingCompressionLevel)
+    DEFINE_SETTINGFACT(agentApiKey)
+    DEFINE_SETTINGFACT(agentApiEndpoint)
+    DEFINE_SETTINGFACT(agentModel)
 
     // QSettings key for clearSettingsNextBoot. Accessed directly by QGCApplication
     // at startup before SettingsManager is initialized.

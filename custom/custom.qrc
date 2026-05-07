@@ -1,0 +1,16 @@
+<RCC>
+    <!-- Custom overlay loaded by FlyView.qml via Loader -->
+    <qresource prefix="/Custom/qml">
+        <file alias="QGroundControl/FlyView/CustomOverlay.qml">src/FlyViewCustomLayer.qml</file>
+        <file alias="QGroundControl/FlyView/AgentPanel.qml">src/AgentPanel.qml</file>
+    </qresource>
+
+    <!-- DJI Fly UI components -->
+    <qresource prefix="/Custom/res/DJIFly">
+        <file alias="DJIFlyTopBar.qml">res/DJIFly/DJIFlyTopBar.qml</file>
+        <file alias="DJIFlyTelemetry.qml">res/DJIFly/DJIFlyTelemetry.qml</file>
+        <file alias="DJIFlyAttitude.qml">res/DJIFly/DJIFlyAttitude.qml</file>
+        <file alias="DJIFlyMiniMap.qml">res/DJIFly/DJIFlyMiniMap.qml</file>
+        <file alias="DJIFlyBottomBar.qml">res/DJIFly/DJIFlyBottomBar.qml</file>
+    </qresource>
+</RCC>

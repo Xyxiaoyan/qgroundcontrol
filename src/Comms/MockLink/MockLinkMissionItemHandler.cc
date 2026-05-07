@@ -164,6 +164,7 @@ void MockLinkMissionItemHandler::_handleMissionRequestList(const mavlink_message
         itemCount = _rallyItems.count();
         break;
     default:
+        itemCount = 0;
         Q_ASSERT(false);
     }
 
