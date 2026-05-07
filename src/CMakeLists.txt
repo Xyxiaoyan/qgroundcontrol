@@ -35,6 +35,7 @@ endif()
 
 # Core subsystems
 add_subdirectory(ADSB)
+add_subdirectory(Agent)
 add_subdirectory(AnalyzeView)
 add_subdirectory(API)
 add_subdirectory(AutoPilotPlugins)

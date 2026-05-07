@@ -1,5 +1,6 @@
 #include "QGCCorePlugin.h"
 #include "AppSettings.h"
+#include "AgentManager.h"
 #include "MavlinkSettings.h"
 #include "FactMetaData.h"
 #include "QGCMAVLink.h"
@@ -288,6 +289,7 @@ QQmlApplicationEngine *QGCCorePlugin::createQmlApplicationEngine(QObject *parent
     QQmlApplicationEngine *const qmlEngine = new QQmlApplicationEngine(parent);
     qmlEngine->addImportPath(QStringLiteral("qrc:/qml"));
     qmlEngine->rootContext()->setContextProperty(QStringLiteral("joystickManager"), JoystickManager::instance());
+    qmlEngine->rootContext()->setContextProperty(QStringLiteral("AgentManager"), AgentManager::instance());
     return qmlEngine;
 }
 

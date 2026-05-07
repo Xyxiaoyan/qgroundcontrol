@@ -108,6 +108,14 @@ Rectangle {
     function _confirmCmd() {
         _showConfirm = false
         if (!_pendingCmd || !_veh) return
+        // Also notify C++ backend if it triggered this command
+        if (AgentManager) {
+            AgentManager.confirmCommand({
+                action: _pendingCmd.action,
+                params: _pendingCmd.params || [],
+                raw: _pendingCmd.raw || ""
+            })
+        }
         var c = _pendingCmd
         try {
             switch (c.action) {
@@ -195,6 +203,7 @@ Rectangle {
     function _cancelCmd() {
         _showConfirm = false
         _pendingCmd = null
+        if (AgentManager) AgentManager.rejectCommand()
         chatModel.append({"role": "system", "content": "✗ 已取消"})
     }
 
@@ -826,6 +835,27 @@ Rectangle {
                     }
                 }
             }
+        }
+    }
+
+    // ── C++ AgentManager integration (P1) ──
+    Connections {
+        target: AgentManager
+
+        function onMessageReceived(role, content) {
+            chatModel.append({"role": role, "content": content})
+        }
+
+        function onCommandPending(description, cmdMap) {
+            if (!_veh) return
+            // Convert QVariantMap to command object for the existing popup
+            _pendingCmd = {
+                action: cmdMap.action,
+                params: cmdMap.params,
+                raw: cmdMap.raw,
+                valid: true
+            }
+            _showConfirm = true
         }
     }
 }
