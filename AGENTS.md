@@ -293,9 +293,7 @@ See [.github/ci-overview.md](.github/ci-overview.md) for the workflow/action/scr
 
 ---
 
-<<<<<<< HEAD
 **Key Principle**: Match the style of code you're editing. See [CODING_STYLE.md](CODING_STYLE.md) for conventions and [CODING_STYLE.md#examples](CODING_STYLE.md#examples) for canonical Vehicle/Fact/QML snippets.
-=======
 **Key Principle**: Match the style of code you're editing. See CODING_STYLE.md for conventions.
 
 
@@ -320,4 +318,3 @@ See [.github/ci-overview.md](.github/ci-overview.md) for the workflow/action/scr
    │  VehicleContext / FlightControl / RelativeMove
    │  AltitudeSpeed / FlightMode / Parameter×3
    │  MavlinkCommand / LogAnalysis
->>>>>>> 42d63c9 (feat: AI Agent v2.0 - ReAct loop, log analysis, multi-provider LLM, dual-axis charts)
