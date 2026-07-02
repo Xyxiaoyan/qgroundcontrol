@@ -3,14 +3,13 @@
     <qresource prefix="/Custom/qml">
         <file alias="QGroundControl/FlyView/CustomOverlay.qml">src/FlyViewCustomLayer.qml</file>
         <file alias="QGroundControl/FlyView/AgentPanel.qml">src/AgentPanel.qml</file>
-    </qresource>
-
-    <!-- DJI Fly UI components -->
-    <qresource prefix="/Custom/res/DJIFly">
-        <file alias="DJIFlyTopBar.qml">res/DJIFly/DJIFlyTopBar.qml</file>
-        <file alias="DJIFlyTelemetry.qml">res/DJIFly/DJIFlyTelemetry.qml</file>
-        <file alias="DJIFlyAttitude.qml">res/DJIFly/DJIFlyAttitude.qml</file>
-        <file alias="DJIFlyMiniMap.qml">res/DJIFly/DJIFlyMiniMap.qml</file>
-        <file alias="DJIFlyBottomBar.qml">res/DJIFly/DJIFlyBottomBar.qml</file>
+        <file alias="QGroundControl/FlyView/LogChartView.qml">src/charts/LogChartView.qml</file>
+        <file alias="QGroundControl/FlyView/VibrationChart.qml">src/charts/VibrationChart.qml</file>
+        <file alias="QGroundControl/FlyView/BatteryChart.qml">src/charts/BatteryChart.qml</file>
+        <file alias="QGroundControl/FlyView/GpsChart.qml">src/charts/GpsChart.qml</file>
+        <file alias="QGroundControl/FlyView/EkfChart.qml">src/charts/EkfChart.qml</file>
+        <file alias="QGroundControl/FlyView/PidChart.qml">src/charts/PidChart.qml</file>
+        <file alias="QGroundControl/FlyView/OpticalFlowChart.qml">src/charts/OpticalFlowChart.qml</file>
+        <file alias="QGroundControl/FlyView/FlightModeOverlay.qml">src/charts/FlightModeOverlay.qml</file>
     </qresource>
 </RCC>

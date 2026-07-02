@@ -290,6 +290,7 @@ QQmlApplicationEngine *QGCCorePlugin::createQmlApplicationEngine(QObject *parent
     qmlEngine->addImportPath(QStringLiteral("qrc:/qml"));
     qmlEngine->rootContext()->setContextProperty(QStringLiteral("joystickManager"), JoystickManager::instance());
     qmlEngine->rootContext()->setContextProperty(QStringLiteral("AgentManager"), AgentManager::instance());
+    qmlRegisterSingletonInstance<AgentManager>("QGroundControl", 1, 0, "AgentManager", AgentManager::instance());
     return qmlEngine;
 }
 
@@ -300,6 +301,7 @@ void QGCCorePlugin::createRootWindow(QQmlApplicationEngine *qmlEngine)
 
 VideoReceiver *QGCCorePlugin::createVideoReceiver(QObject *parent)
 {
+    Q_UNUSED(parent);
 #ifdef QGC_GST_STREAMING
     return GStreamer::createVideoReceiver(parent);
 #elif defined(QGC_QT_STREAMING)

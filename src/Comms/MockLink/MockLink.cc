@@ -601,9 +601,9 @@ void MockLink::_sendSysStatus()
         _vehicleComponentId,
         _outgoingMavlinkChannel,
         &msg,
-        MAV_SYS_STATUS_SENSOR_GPS,  // onboard_control_sensors_present
-        0,                          // onboard_control_sensors_enabled
-        0,                          // onboard_control_sensors_health
+        MAV_SYS_STATUS_SENSOR_3D_GYRO | MAV_SYS_STATUS_SENSOR_3D_ACCEL | MAV_SYS_STATUS_SENSOR_3D_MAG | MAV_SYS_STATUS_SENSOR_GPS | MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE | MAV_SYS_STATUS_PREARM_CHECK,  // onboard_control_sensors_present
+        MAV_SYS_STATUS_SENSOR_3D_GYRO | MAV_SYS_STATUS_SENSOR_3D_ACCEL | MAV_SYS_STATUS_SENSOR_3D_MAG | MAV_SYS_STATUS_SENSOR_GPS | MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE | MAV_SYS_STATUS_PREARM_CHECK,  // onboard_control_sensors_enabled
+        MAV_SYS_STATUS_SENSOR_3D_GYRO | MAV_SYS_STATUS_SENSOR_3D_ACCEL | MAV_SYS_STATUS_SENSOR_3D_MAG | MAV_SYS_STATUS_SENSOR_GPS | MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE | MAV_SYS_STATUS_PREARM_CHECK,  // onboard_control_sensors_health
         250,                        // load
         4200 * 4,                   // voltage_battery
         8000,                       // current_battery
@@ -615,8 +615,17 @@ void MockLink::_sendSysStatus()
 
 void MockLink::_sendBatteryStatus()
 {
+    // Simulate realistic battery drain:
+    // - Disarmed/idle: 0.1% per minute (idle current)
+    // - Armed/flying: ~8% per minute (drains to 0% in ~12 minutes of flight)
+    constexpr double kDrainRateIdle = 0.1 / 60.0;   // 0.1% per second when idle
+    constexpr double kDrainRateArmed = 100.0 / 720.0; // 100% per 720 seconds when flying
+
     if (_battery1PctRemaining > 1) {
-        _battery1PctRemaining = static_cast<int8_t>(100 - (_runningTime.elapsed() / 1000));
+        double elapsedSec = _runningTime.elapsed() / 1000.0;
+        double drainRate = armed() ? kDrainRateArmed : kDrainRateIdle;
+        int8_t newPct = static_cast<int8_t>(100.0 - elapsedSec * drainRate);
+        _battery1PctRemaining = newPct < 1 ? static_cast<int8_t>(1) : (newPct > 100 ? static_cast<int8_t>(100) : newPct);
         _battery1TimeRemaining = static_cast<double>(_batteryMaxTimeRemaining) * (static_cast<double>(_battery1PctRemaining) / 100.0);
         if (_battery1PctRemaining > 50) {
             _battery1ChargeState = MAV_BATTERY_CHARGE_STATE_OK;
@@ -630,7 +639,10 @@ void MockLink::_sendBatteryStatus()
     }
 
     if (_battery2PctRemaining > 1) {
-        _battery2PctRemaining = static_cast<int8_t>(100 - ((_runningTime.elapsed() / 1000) / 2));
+        double elapsedSec = _runningTime.elapsed() / 1000.0;
+        double drainRate = armed() ? kDrainRateArmed * 0.5 : kDrainRateIdle * 0.5;
+        int8_t newPct = static_cast<int8_t>(100.0 - elapsedSec * drainRate);
+        _battery2PctRemaining = newPct < 1 ? static_cast<int8_t>(1) : (newPct > 100 ? static_cast<int8_t>(100) : newPct);
         _battery2TimeRemaining = static_cast<double>(_batteryMaxTimeRemaining) * (static_cast<double>(_battery2PctRemaining) / 100.0);
         if (_battery2PctRemaining > 50) {
             _battery2ChargeState = MAV_BATTERY_CHARGE_STATE_OK;
@@ -1729,8 +1741,20 @@ void MockLink::_handleCommandLong(const mavlink_message_t &msg)
         }
         break;
     }
+    case MAV_CMD_DO_SET_MODE:
+        _mavBaseMode = static_cast<uint8_t>(request.param1);
+        _mavCustomMode = static_cast<uint32_t>(request.param2);
+        commandResult = MAV_RESULT_ACCEPTED;
+        break;
     case MAV_CMD_NAV_TAKEOFF:
         _handleTakeoff(request);
+        commandResult = MAV_RESULT_ACCEPTED;
+        break;
+    case MAV_CMD_NAV_LAND:
+    case MAV_CMD_NAV_RETURN_TO_LAUNCH:
+    case MAV_CMD_DO_REPOSITION:
+    case MAV_CMD_DO_ORBIT:
+    case MAV_CMD_DO_CHANGE_SPEED:
         commandResult = MAV_RESULT_ACCEPTED;
         break;
     case MAV_CMD_MOCKLINK_ALWAYS_RESULT_ACCEPTED:

@@ -127,14 +127,11 @@ Item {
             source:             "qrc:/Custom/qml/QGroundControl/FlyView/CustomOverlay.qml"
 
             onLoaded: {
-                console.log("CustomOverlay loaded successfully, item:", item)
-            }
-
-            onStatusChanged: {
-                if (status === Loader.Error) {
-                    console.log("CustomOverlay load FAILED:", sourceComponent ? "component error" : "source error")
-                } else if (status === Loader.Ready) {
-                    console.log("CustomOverlay status: Ready")
+                if (item) {
+                    item.parentToolInsets = Qt.binding(function() { return widgetLayer ? widgetLayer.totalToolInsets : null })
+                    item.totalToolInsets = Qt.binding(function() { return widgetLayer ? widgetLayer.totalToolInsets : null })
+                    item.mapControl = Qt.binding(function() { return _mapControl })
+                    item.videoControl = videoControl
                 }
             }
         }

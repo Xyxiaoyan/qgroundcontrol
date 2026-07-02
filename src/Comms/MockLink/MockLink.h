@@ -440,8 +440,8 @@ private:
 
     // Vehicle position is set close to default Gazebo vehicle location. This allows for multi-vehicle
     // testing of a gazebo vehicle and a mocklink vehicle
-    static constexpr double _defaultVehicleLatitude = 47.397;
-    static constexpr double _defaultVehicleLongitude = 8.5455;
+    static constexpr double _defaultVehicleLatitude = 22.5431;
+    static constexpr double _defaultVehicleLongitude = 114.0579;
     static constexpr double _defaultVehicleHomeAltitude = 488.056;
 
     static constexpr const char *_failParam = "COM_FLTMODE6";

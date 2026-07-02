@@ -1,8 +1,8 @@
 # ============================================================================
-# DJI Fly Custom Build Configuration
+# AgentQGC Custom Build Configuration
 # ============================================================================
 
 # Application Branding
-set(QGC_APP_NAME "DJIFlyControl" CACHE STRING "App Name" FORCE)
-set(QGC_ORG_NAME "DJIFly" CACHE STRING "Org Name" FORCE)
-set(QGC_APP_DESCRIPTION "DJI Fly Style Ground Control Station" CACHE STRING "App Description" FORCE)
+set(QGC_APP_NAME "AgentQGC" CACHE STRING "App Name" FORCE)
+set(QGC_ORG_NAME "AgentQGC" CACHE STRING "Org Name" FORCE)
+set(QGC_APP_DESCRIPTION "Agent-Powered Ground Control Station" CACHE STRING "App Description" FORCE)
