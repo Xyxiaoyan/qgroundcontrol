@@ -84,8 +84,16 @@ AgentManager::AgentManager(QObject *parent)
     connect(_reactLoop, &ReActLoop::thoughtProduced,     this, &AgentManager::_onReActThought);
     connect(_reactLoop, &ReActLoop::toolInvoked,         this, &AgentManager::_onReActToolInvoked);
     connect(_reactLoop, &ReActLoop::finalAnswer,         this, &AgentManager::_onReActFinalAnswer);
-    connect(_llm, &LLMClient::modelsFetched,              this, &AgentManager::modelsFetched);
+    connect(_llm, &LLMClient::modelsFetched,              this, [this](const QJsonArray &models) {
+        _connectionStatus = StatusConnected;
+        emit connectionStatusChanged();
+        emit modelsFetched(models);
+    });
     connect(_llm, &LLMClient::requestError,              this, [this](const QString &err) {
+        if (_connectionStatus == StatusConnecting) {
+            _connectionStatus = StatusFailed;
+            emit connectionStatusChanged();
+        }
         _errorMessage = err;
         emit errorMessageChanged();
     });
@@ -351,13 +359,20 @@ void AgentManager::setAutonomous(bool autonomous)
 void AgentManager::fetchModels()
 {
     if (_apiEndpoint.isEmpty() || _apiKey.isEmpty()) {
-        _errorMessage = QStringLiteral("请先设置 API Endpoint 和 API Key");
+        _errorMessage = QStringLiteral("请先设置 Base URL 和 API Key");
         emit errorMessageChanged();
         return;
     }
-    _statusText = QStringLiteral("获取模型列表...");
+    _statusText = QStringLiteral("正在连接...");
     emit statusTextChanged();
+    _connectionStatus = StatusConnecting;
+    emit connectionStatusChanged();
     _llm->fetchModels(_apiEndpoint, _apiKey);
+}
+
+void AgentManager::testConnection()
+{
+    fetchModels();
 }
 
 void AgentManager::clearConversationHistory()
@@ -572,6 +587,7 @@ void AgentManager::_onReActStarted()
     _isProcessing = true;
     emit isProcessingChanged();
     _streamAccum.clear();
+    if (_streamThrottle) _streamThrottle->stop();
     emit streamingTextChanged();
     _thinkingAccum.clear();
     if (_thinkThrottle) _thinkThrottle->stop();
@@ -582,6 +598,12 @@ void AgentManager::_onReActStarted()
 
 void AgentManager::_onReActStopped()
 {
+    // Flush throttled stream before marking idle
+    if (_streamThrottle && _streamThrottle->isActive()) {
+        _streamThrottle->stop();
+        emit streamingTextChanged();
+    }
+
     // Flush throttled thinking before marking idle
     if (_thinkThrottle && _thinkThrottle->isActive()) {
         _thinkThrottle->stop();
@@ -612,7 +634,17 @@ void AgentManager::_onReActMessageProduced(const QString &role, const QString &c
 void AgentManager::_onReActStreamChunk(const QString &text)
 {
     _streamAccum += text;
-    emit streamingTextChanged();
+
+    // Throttle: emit at most once per 150ms to prevent QML layout thrashing
+    if (!_streamThrottle) {
+        _streamThrottle = new QTimer(this);
+        _streamThrottle->setSingleShot(true);
+        _streamThrottle->setInterval(150);
+        connect(_streamThrottle, &QTimer::timeout, this, [this]() {
+            emit streamingTextChanged();
+        });
+    }
+    _streamThrottle->start(); // Restart — only fires if idle for 150ms
 }
 
 void AgentManager::_onReActThinkingChunk(const QString &text)

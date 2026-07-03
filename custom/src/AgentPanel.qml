@@ -44,7 +44,7 @@ Rectangle {
     readonly property color _textDim:       Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.5)
 
     property bool isExpanded: false
-    property int currentTab: 0  // 0=chat, 1=diagnostics, 2=settings
+    property int currentTab: 0  // 0=chat, 1=diagnostics, 2=charts, 3=settings
 
     // ═══ AgentManager (injected by FlyViewCustomLayer) ═══
     property var _agentMgr: null
@@ -525,7 +525,7 @@ Rectangle {
                         model: ListModel { id: chatModel }
                         spacing: Math.round(_sp * 0.35); clip: true
 
-                        // Auto-scroll to bottom when new messages arrive
+                        // Auto-scroll to bottom when new messages arrive (not on content updates)
                         onCountChanged: Qt.callLater(function() { positionViewAtEnd() })
 
                         ScrollBar.vertical: ScrollBar {
@@ -634,7 +634,11 @@ Rectangle {
                                              : _textPrimary
                                         font.pixelSize: model.role === "thinking" ? Math.round(_sp * 0.9) : Math.round(_sp * 1.05)
                                         wrapMode: Text.Wrap
-                                        textFormat: model.role === "thinking" ? Text.PlainText : Text.MarkdownText
+                                        textFormat: model.role === "thinking"
+                                            ? Text.PlainText
+                                            : model.role === "streaming"
+                                            ? Text.PlainText  // Avoid expensive Markdown re-parse on every token
+                                            : Text.MarkdownText
                                         lineHeight: 1.3
                                     }
 
@@ -979,171 +983,301 @@ Rectangle {
                 ColumnLayout {
                     id: settingsCol
                     width: parent.width
-                    spacing: Math.round(_sp * 0.5)
+                    spacing: Math.round(_sp * 0.6)
 
-                    Text {
-                        text: "⚙ API 设置"
-                        color: _accentCyan
-                        font { pixelSize: Math.round(_sp * 1.1); bold: true }
-                    }
-                    Rectangle { Layout.fillWidth: true; height: 1; color: _borderDim }
-
-                    // ── Provider preset selector ──
-                    Text { text: "供应商"; font.pixelSize: Math.round(_sp * 1.0); color: _textPrimary }
-                    ComboBox {
-                        id: providerCombo
+                    // ── Header + connection status ──
+                    RowLayout {
                         Layout.fillWidth: true
-                        model: ["DeepSeek", "DashScope (通义千问)", "智谱GLM", "OpenAI", "Ollama (本地)", "自定义"]
-                        currentIndex: _detectProviderIndex()
-                        onActivated: _applyProviderPreset(currentIndex)
-                        background: Rectangle {
-                            radius: Math.round(_sp * 0.3); color: _bgDark
-                            border { color: _borderDim; width: 1 }
+                        Text {
+                            text: "⚙ API 设置"
+                            color: _accentCyan
+                            font { pixelSize: Math.round(_sp * 1.1); bold: true }
                         }
-                        contentItem: Text {
-                            text: parent.displayText; color: qgcPal.buttonText
-                            font.pixelSize: Math.round(_sp * 1.1)
-                            verticalAlignment: Text.AlignVCenter; leftPadding: Math.round(_sp * 0.6)
-                        }
-                    }
-
-                    // ── API Key ──
-                    Text { text: "API Key（必填）"; font.pixelSize: Math.round(_sp * 1.0); color: _textPrimary }
-                    RowLayout {
-                        Layout.fillWidth: true; spacing: Math.round(_sp * 0.3)
-                        TextField {
-                            id: apiKeyField
-                            Layout.fillWidth: true
-                            font.pixelSize: Math.round(_sp * 1.1)
-                            echoMode: TextInput.Password
-                            placeholderText: "sk-xxxxxxxxxxxxxxxx"
-                            selectByMouse: true
-                            Component.onCompleted: { if (_agentOK) text = _agentMgr.apiKey }
-                            onEditingFinished: { if (_agentMgr) _agentMgr.setApiKey(text) }
-                            background: Rectangle {
-                                radius: Math.round(_sp * 0.3); color: _bgDark
-                                border { color: _borderDim; width: 1 }
-                            }
-                            color: qgcPal.textFieldText
-                        }
+                        Item { Layout.fillWidth: true }
+                        // Connection status indicator
                         Rectangle {
-                            width: toggleApiText.implicitWidth + _sp * 1.4
-                            height: Math.round(_sp * 2.2)
-                            radius: Math.round(_sp * 0.25)
-                            color: apiTogHover.hovered ? Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.1) : "transparent"
-                            Text {
-                                id: toggleApiText; anchors.centerIn: parent
-                                text: apiKeyField.echoMode === TextInput.Normal ? "隐藏" : "显示"
-                                color: _accentCyan; font.pixelSize: _sp
+                            Layout.preferredWidth: statusRow.implicitWidth + _sp * 1.0
+                            Layout.preferredHeight: Math.round(_sp * 1.8)
+                            Layout.alignment: Qt.AlignVCenter
+                            radius: height / 2
+                            color: Qt.rgba(_connColor.r, _connColor.g, _connColor.b, 0.12)
+                            border.color: _connColor; border.width: 1
+                            readonly property color _connColor: {
+                                if (!_agentOK) return _textDim
+                                var s = _agentMgr.connectionStatus
+                                if (s === 1) return _accentOrange      // Connecting
+                                if (s === 2) return _accentGreen        // Connected
+                                if (s === 3) return _accentRed          // Failed
+                                return _textDim                          // Unknown
                             }
-                            MouseArea {
-                                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                onClicked: { apiKeyField.echoMode = apiKeyField.echoMode === TextInput.Normal ? TextInput.Password : TextInput.Normal }
-                            }
-                            HoverHandler { id: apiTogHover }
-                        }
-                    }
-
-                    // ── Base URL (without /v1/chat/completions) ──
-                    Text { text: "Base URL"; font.pixelSize: Math.round(_sp * 1.0); color: _textPrimary }
-                    RowLayout {
-                        Layout.fillWidth: true; spacing: Math.round(_sp * 0.3)
-                        TextField {
-                            id: baseUrlField
-                            Layout.fillWidth: true
-                            font.pixelSize: Math.round(_sp * 1.0)
-                            placeholderText: "https://api.deepseek.com/v1"
-                            selectByMouse: true
-                            Component.onCompleted: { if (_agentOK) text = _agentMgr.baseApiEndpoint() }
-                            onEditingFinished: { if (_agentMgr) _agentMgr.setApiEndpoint(text) }
-                            background: Rectangle {
-                                radius: Math.round(_sp * 0.3); color: _bgDark
-                                border { color: _borderDim; width: 1 }
-                            }
-                            color: qgcPal.textFieldText
-                        }
-                        // Test connection / fetch models button
-                        Rectangle {
-                            width: fetchBtn.implicitWidth + _sp * 1.2
-                            height: Math.round(_sp * 2.2)
-                            radius: Math.round(_sp * 0.3)
-                            color: fetchEnabled ? (fetchHover.hovered ? _accentCyan : Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.8))
-                                               : _bgDark
-                            border { color: fetchEnabled ? _accentCyan : _borderDim; width: 1 }
-                            property bool fetchEnabled: _agentOK && baseUrlField.text.length > 0 && apiKeyField.text.length > 0 && !_agentBusy
-                            Text {
-                                id: fetchBtn; anchors.centerIn: parent; text: "获取模型"
-                                color: parent.fetchEnabled ? qgcPal.primaryButtonText : _textDim
-                                font.pixelSize: _sp
-                            }
-                            MouseArea {
-                                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                enabled: parent.fetchEnabled
-                                onClicked: {
-                                    if (_agentMgr) {
-                                        _agentMgr.setApiKey(apiKeyField.text)
-                                        _agentMgr.setApiEndpoint(baseUrlField.text)
-                                        _agentMgr.fetchModels()
+                            RowLayout {
+                                id: statusRow
+                                anchors.centerIn: parent
+                                spacing: Math.round(_sp * 0.25)
+                                Rectangle {
+                                    width: Math.round(_sp * 0.5); height: width
+                                    radius: width / 2; color: parent.parent._connColor
+                                    SequentialAnimation on opacity {
+                                        running: _agentOK && _agentMgr.connectionStatus === 1
+                                        loops: Animation.Infinite
+                                        NumberAnimation { to: 0.3; duration: 600 }
+                                        NumberAnimation { to: 1.0; duration: 600 }
                                     }
                                 }
-                            }
-                            HoverHandler { id: fetchHover; enabled: parent.fetchEnabled }
-                        }
-                    }
-                    Text {
-                        Layout.fillWidth: true; font.pixelSize: Math.round(_sp * 0.75); color: _textDim
-                        text: "自动拼接 /v1/chat/completions，只需输入到 /v1 或域名"
-                        wrapMode: Text.Wrap
-                    }
-
-                    // ── Model selection ──
-                    Text { text: "Model"; font.pixelSize: Math.round(_sp * 1.0); color: _textPrimary }
-                    ComboBox {
-                        id: modelCombo
-                        Layout.fillWidth: true
-                        editable: true
-                        model: _fetchedModels
-                        onModelChanged: {
-                            if (_agentMgr && _fetchedModels.length > 0) {
-                                var m = _agentMgr.modelName
-                                for (var i = 0; i < _fetchedModels.length; i++) {
-                                    if (_fetchedModels[i] === m) { currentIndex = i; return }
+                                Text {
+                                    text: {
+                                        if (!_agentOK) return "未就绪"
+                                        var s = _agentMgr.connectionStatus
+                                        if (s === 1) return "连接中..."
+                                        if (s === 2) return "已连接"
+                                        if (s === 3) return "连接失败"
+                                        return "未测试"
+                                    }
+                                    color: parent.parent._connColor
+                                    font.pixelSize: Math.round(_sp * 0.8)
+                                    font.bold: true
                                 }
-                                currentIndex = -1; editText = m
                             }
-                        }
-                        Component.onCompleted: { if (_agentMgr) editText = _agentMgr.modelName }
-                        onActivated: { if (_agentMgr && currentText.length > 0) _agentMgr.setModelName(currentText) }
-                        onAccepted: { if (_agentMgr && editText.length > 0) _agentMgr.setModelName(editText) }
-                        background: Rectangle {
-                            radius: Math.round(_sp * 0.3); color: _bgDark
-                            border { color: _borderDim; width: 1 }
-                        }
-                        contentItem: Text {
-                            text: parent.displayText; color: qgcPal.buttonText
-                            font.pixelSize: Math.round(_sp * 1.1)
-                            verticalAlignment: Text.AlignVCenter; leftPadding: Math.round(_sp * 0.6)
                         }
                     }
 
-                    Rectangle { Layout.fillWidth: true; height: 1; color: _borderDim }
-
-                    // ── Geocode API Key ──
-                    Text { text: "高德地图 API Key（逆地理编码）"; font.pixelSize: Math.round(_sp * 1.0); color: _textPrimary }
-                    TextField {
-                        id: geocodeKeyField
+                    // ── Card: 供应商 ──
+                    Rectangle {
                         Layout.fillWidth: true
-                        font.pixelSize: Math.round(_sp * 1.1)
-                        echoMode: TextInput.Password
-                        placeholderText: "高德 Web 服务 API Key"
-                        selectByMouse: true
-                        Component.onCompleted: { if (_agentOK) text = _agentMgr.geocodeApiKey }
-                        onEditingFinished: { if (_agentMgr) _agentMgr.setGeocodeApiKey(text) }
-                        background: Rectangle {
-                            radius: Math.round(_sp * 0.3); color: _bgDark
-                            border { color: _borderDim; width: 1 }
+                        implicitHeight: providerInner.implicitHeight + Math.round(_sp * 1.2)
+                        radius: Math.round(_sp * 0.4)
+                        color: _bgCard
+                        border.color: _borderDim; border.width: 1
+                        ColumnLayout {
+                            id: providerInner
+                            anchors.fill: parent; anchors.margins: Math.round(_sp * 0.6)
+                            spacing: Math.round(_sp * 0.4)
+                            Text {
+                                text: "供应商"
+                                color: _textDim
+                                font.pixelSize: Math.round(_sp * 0.75)
+                                font.capitalization: Font.AllUppercase
+                            }
+                            ComboBox {
+                                id: providerCombo
+                                Layout.fillWidth: true
+                                model: ["DeepSeek", "DashScope (通义千问)", "智谱GLM", "OpenAI", "Ollama (本地)", "自定义"]
+                                currentIndex: _detectProviderIndex()
+                                onActivated: _applyProviderPreset(currentIndex)
+                                background: Rectangle {
+                                    radius: Math.round(_sp * 0.3); color: _bgDark
+                                    border { color: _borderDim; width: 1 }
+                                }
+                                contentItem: Text {
+                                    text: parent.displayText; color: qgcPal.buttonText
+                                    font.pixelSize: Math.round(_sp * 1.1)
+                                    verticalAlignment: Text.AlignVCenter; leftPadding: Math.round(_sp * 0.6)
+                                }
+                            }
                         }
-                        color: qgcPal.textFieldText
+                    }
+
+                    // ── Card: 认证配置 ──
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: authInner.implicitHeight + Math.round(_sp * 1.2)
+                        radius: Math.round(_sp * 0.4)
+                        color: _bgCard
+                        border.color: _borderDim; border.width: 1
+                        ColumnLayout {
+                            id: authInner
+                            anchors.fill: parent; anchors.margins: Math.round(_sp * 0.6)
+                            spacing: Math.round(_sp * 0.4)
+
+                            Text {
+                                text: "认证配置"
+                                color: _textDim
+                                font.pixelSize: Math.round(_sp * 0.75)
+                                font.capitalization: Font.AllUppercase
+                            }
+
+                            // API Key
+                            Text { text: "API Key（必填）"; font.pixelSize: Math.round(_sp * 0.9); color: _textPrimary }
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: Math.round(_sp * 0.3)
+                                TextField {
+                                    id: apiKeyField
+                                    Layout.fillWidth: true
+                                    font.pixelSize: Math.round(_sp * 1.0)
+                                    echoMode: TextInput.Password
+                                    placeholderText: "sk-xxxxxxxxxxxxxxxx"
+                                    selectByMouse: true
+                                    Component.onCompleted: { if (_agentOK) text = _agentMgr.apiKey }
+                                    onEditingFinished: { if (_agentMgr) _agentMgr.setApiKey(text) }
+                                    background: Rectangle {
+                                        radius: Math.round(_sp * 0.3); color: _bgDark
+                                        border { color: apiKeyField.text.length === 0 ? _accentRed : _borderDim; width: 1 }
+                                    }
+                                    color: qgcPal.textFieldText
+                                }
+                                Rectangle {
+                                    Layout.preferredWidth: toggleApiText.implicitWidth + _sp * 1.4
+                                    Layout.preferredHeight: Math.round(_sp * 2.0)
+                                    Layout.alignment: Qt.AlignVCenter
+                                    radius: Math.round(_sp * 0.25)
+                                    color: apiTogHover.hovered ? Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.1) : "transparent"
+                                    Text {
+                                        id: toggleApiText; anchors.centerIn: parent
+                                        text: apiKeyField.echoMode === TextInput.Normal ? "隐藏" : "显示"
+                                        color: _accentCyan; font.pixelSize: _sp
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                        onClicked: { apiKeyField.echoMode = apiKeyField.echoMode === TextInput.Normal ? TextInput.Password : TextInput.Normal }
+                                    }
+                                    HoverHandler { id: apiTogHover }
+                                }
+                            }
+
+                            // Base URL + Test button
+                            Text { text: "Base URL"; font.pixelSize: Math.round(_sp * 0.9); color: _textPrimary }
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: Math.round(_sp * 0.3)
+                                TextField {
+                                    id: baseUrlField
+                                    Layout.fillWidth: true
+                                    font.pixelSize: Math.round(_sp * 0.95)
+                                    placeholderText: "https://api.deepseek.com/v1"
+                                    selectByMouse: true
+                                    Component.onCompleted: { if (_agentOK) text = _agentMgr.baseApiEndpoint() }
+                                    onEditingFinished: { if (_agentMgr) _agentMgr.setApiEndpoint(text) }
+                                    background: Rectangle {
+                                        radius: Math.round(_sp * 0.3); color: _bgDark
+                                        border { color: baseUrlField.text.length === 0 ? _accentRed : _borderDim; width: 1 }
+                                    }
+                                    color: qgcPal.textFieldText
+                                }
+                                Rectangle {
+                                    Layout.preferredWidth: testBtn.implicitWidth + _sp * 1.2
+                                    Layout.preferredHeight: Math.round(_sp * 2.0)
+                                    Layout.alignment: Qt.AlignVCenter
+                                    radius: Math.round(_sp * 0.3)
+                                    color: testEnabled ? (testHover.hovered ? _accentCyan : Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.8))
+                                                       : _bgDark
+                                    border { color: testEnabled ? _accentCyan : _borderDim; width: 1 }
+                                    property bool testEnabled: _agentOK && baseUrlField.text.length > 0 && apiKeyField.text.length > 0 && !_agentBusy
+                                    Text {
+                                        id: testBtn; anchors.centerIn: parent
+                                        text: _agentOK && _agentMgr.connectionStatus === 1 ? "..." : "测试连接"
+                                        color: parent.testEnabled ? qgcPal.primaryButtonText : _textDim
+                                        font.pixelSize: _sp
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                        enabled: parent.testEnabled
+                                        onClicked: {
+                                            if (_agentMgr) {
+                                                _agentMgr.setApiKey(apiKeyField.text)
+                                                _agentMgr.setApiEndpoint(baseUrlField.text)
+                                                _agentMgr.testConnection()
+                                            }
+                                        }
+                                    }
+                                    HoverHandler { id: testHover; enabled: parent.testEnabled }
+                                }
+                            }
+                            Text {
+                                Layout.fillWidth: true; font.pixelSize: Math.round(_sp * 0.7); color: _textDim
+                                text: "只需输入到 /v1 或域名，自动拼接 /chat/completions"
+                                wrapMode: Text.Wrap
+                            }
+                        }
+                    }
+
+                    // ── Card: 模型 ──
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: modelInner.implicitHeight + Math.round(_sp * 1.2)
+                        radius: Math.round(_sp * 0.4)
+                        color: _bgCard
+                        border.color: _borderDim; border.width: 1
+                        ColumnLayout {
+                            id: modelInner
+                            anchors.fill: parent; anchors.margins: Math.round(_sp * 0.6)
+                            spacing: Math.round(_sp * 0.4)
+
+                            Text {
+                                text: "模型"
+                                color: _textDim
+                                font.pixelSize: Math.round(_sp * 0.75)
+                                font.capitalization: Font.AllUppercase
+                            }
+                            ComboBox {
+                                id: modelCombo
+                                Layout.fillWidth: true
+                                editable: true
+                                model: _fetchedModels
+                                onModelChanged: {
+                                    if (_agentMgr && _fetchedModels.length > 0) {
+                                        var m = _agentMgr.modelName
+                                        for (var i = 0; i < _fetchedModels.length; i++) {
+                                            if (_fetchedModels[i] === m) { currentIndex = i; return }
+                                        }
+                                        currentIndex = -1; editText = m
+                                    }
+                                }
+                                Component.onCompleted: { if (_agentMgr) editText = _agentMgr.modelName }
+                                onActivated: { if (_agentMgr && currentText.length > 0) _agentMgr.setModelName(currentText) }
+                                onAccepted: { if (_agentMgr && editText.length > 0) _agentMgr.setModelName(editText) }
+                                background: Rectangle {
+                                    radius: Math.round(_sp * 0.3); color: _bgDark
+                                    border { color: _borderDim; width: 1 }
+                                }
+                                contentItem: Text {
+                                    text: parent.displayText; color: qgcPal.buttonText
+                                    font.pixelSize: Math.round(_sp * 1.1)
+                                    verticalAlignment: Text.AlignVCenter; leftPadding: Math.round(_sp * 0.6)
+                                }
+                            }
+                            Text {
+                                font.pixelSize: Math.round(_sp * 0.7); color: _textDim
+                                text: _fetchedModels.length > 0
+                                    ? "已获取 " + _fetchedModels.length + " 个模型，也可手动输入"
+                                    : "点击「测试连接」获取可用模型，或直接输入模型名"
+                            }
+                        }
+                    }
+
+                    // ── Card: 其他设置 ──
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: otherInner.implicitHeight + Math.round(_sp * 1.2)
+                        radius: Math.round(_sp * 0.4)
+                        color: _bgCard
+                        border.color: _borderDim; border.width: 1
+                        ColumnLayout {
+                            id: otherInner
+                            anchors.fill: parent; anchors.margins: Math.round(_sp * 0.6)
+                            spacing: Math.round(_sp * 0.4)
+
+                            Text {
+                                text: "其他设置"
+                                color: _textDim
+                                font.pixelSize: Math.round(_sp * 0.75)
+                                font.capitalization: Font.AllUppercase
+                            }
+                            Text { text: "高德地图 API Key（逆地理编码）"; font.pixelSize: Math.round(_sp * 0.9); color: _textPrimary }
+                            TextField {
+                                id: geocodeKeyField
+                                Layout.fillWidth: true
+                                font.pixelSize: Math.round(_sp * 1.0)
+                                echoMode: TextInput.Password
+                                placeholderText: "高德 Web 服务 API Key"
+                                selectByMouse: true
+                                Component.onCompleted: { if (_agentOK) text = _agentMgr.geocodeApiKey }
+                                onEditingFinished: { if (_agentMgr) _agentMgr.setGeocodeApiKey(text) }
+                                background: Rectangle {
+                                    radius: Math.round(_sp * 0.3); color: _bgDark
+                                    border { color: _borderDim; width: 1 }
+                                }
+                                color: qgcPal.textFieldText
+                            }
+                        }
                     }
 
                     Item { Layout.fillHeight: true }
@@ -1176,7 +1310,7 @@ Rectangle {
 
                     Text {
                         Layout.fillWidth: true
-                        font.pixelSize: Math.round(_sp * 0.8)
+                        font.pixelSize: Math.round(_sp * 0.75)
                         color: _accentGreen
                         wrapMode: Text.Wrap
                         text: "配置已加密存储于本地\n切换供应商会自动填充 URL 和默认模型"
@@ -1504,7 +1638,10 @@ Rectangle {
         function onModelsFetched(models) {
             var arr = []; for (var i = 0; i < models.length; i++) arr.push(models[i])
             _fetchedModels = arr
-            chatModel.append({"role": "system", "content": "✓ 获取到 " + arr.length + " 个模型", "ts": _nowTs()})
+            // Only notify in chat when not on settings tab (settings has its own status indicator)
+            if (currentTab !== 3) {
+                chatModel.append({"role": "system", "content": "✓ 获取到 " + arr.length + " 个模型", "ts": _nowTs()})
+            }
         }
         function onDownloadedLogsList(logs) { _logListCache = logs }
         function onOnboardDownloadProgress(status) {

@@ -27,6 +27,14 @@ public:
     explicit AgentManager(QObject *parent = nullptr);
     ~AgentManager();
 
+    enum ConnectionStatus {
+        StatusUnknown = 0,
+        StatusConnecting,
+        StatusConnected,
+        StatusFailed
+    };
+    Q_ENUM(ConnectionStatus)
+
     Q_PROPERTY(bool isProcessing READ isProcessing NOTIFY isProcessingChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
@@ -39,6 +47,7 @@ public:
     Q_PROPERTY(QString streamingText READ streamingText NOTIFY streamingTextChanged)
     Q_PROPERTY(QString thinkingText READ thinkingText NOTIFY thinkingTextChanged)
     Q_PROPERTY(LogAnalysisModel *logAnalysisModel READ logAnalysisModel NOTIFY logAnalysisModelChanged)
+    Q_PROPERTY(int connectionStatus READ connectionStatus NOTIFY connectionStatusChanged)
 
     bool isProcessing() const { return _isProcessing; }
     QString errorMessage() const { return _errorMessage; }
@@ -48,6 +57,7 @@ public:
     QString streamingText() const { return _streamAccum; }
     QString thinkingText() const { return _thinkingAccum; }
     LogAnalysisModel *logAnalysisModel() const { return _logAnalysisModel; }
+    int connectionStatus() const { return _connectionStatus; }
 
     Q_INVOKABLE void sendMessage(const QString &userMessage);
     Q_INVOKABLE void cancelRequest();
@@ -72,6 +82,7 @@ public:
     Q_INVOKABLE void downloadOnboardLogByIndex(int index);
     Q_INVOKABLE void analyzeLogByIndex(int index);
     Q_INVOKABLE void fetchModels();
+    Q_INVOKABLE void testConnection();
     Q_INVOKABLE void clearConversationHistory();
     Q_INVOKABLE bool hasConversationHistory() const;
 
@@ -100,6 +111,7 @@ signals:
     void onboardDownloadProgress(const QString &status);
     void onboardDownloadComplete(const QString &filePath);
     void modelsFetched(const QJsonArray &models);
+    void connectionStatusChanged();
 
 public slots:
     Q_INVOKABLE void confirmCommand(const QVariantMap &cmdMap);
@@ -151,8 +163,10 @@ private:
     QString _streamAccum;
     QString _thinkingAccum;
     QTimer *_thinkThrottle = nullptr;
+    QTimer *_streamThrottle = nullptr;
     int _totalTokens = 0;
     bool _inVisionQuery = false;
+    int _connectionStatus = StatusUnknown;
     QString _lastThought;
     QString _lastToolAction;
     static constexpr int kDailyTokenLimit = 200000;

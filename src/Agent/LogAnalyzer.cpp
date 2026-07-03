@@ -1,7 +1,7 @@
 #include "LogAnalyzer.h"
 
-#include <Utilities/Parsing/ULog/ULogUtility.h>
-#include <Utilities/Parsing/DataFlash/DataFlashUtility.h>
+#include <Utilities/Parsing/PX4ULog/PX4ULogUtility.h>
+#include <Utilities/Parsing/APMDataFlash/APMDataFlashUtility.h>
 #include <QGCLoggingCategory.h>
 
 #include <QtCore/QDateTime>
@@ -60,9 +60,9 @@ bool LogAnalyzer::loadLog(const QString &filePath)
         return false;
     }
 
-    if (!ULogUtility::isValidHeader(_fileData.constData(), _fileData.size())) {
+    if (!PX4ULogUtility::isValidHeader(_fileData.constData(), _fileData.size())) {
         // Try DataFlash (ArduPilot .bin) as fallback
-        if (DataFlashUtility::isValidHeader(_fileData.constData(), _fileData.size())) {
+        if (APMDataFlashUtility::isValidHeader(_fileData.constData(), _fileData.size())) {
             _extractDataFlashData();
             _loaded = true;
             qCDebug(LogAnalyzerLog) << "Loaded DataFlash" << filePath
@@ -105,7 +105,7 @@ static bool _tryExtractSensor(const QByteArray &data, const char *topic,
                                std::function<void(uint64_t, float, float, float)> cb,
                                QString &err)
 {
-    return ULogUtility::iterateMessages(
+    return PX4ULogUtility::iterateMessages(
         data.constData(), data.size(), topic,
         [&](const ulog_cpp::TypedDataView &s) {
             uint64_t ts = s.at(tsField).as<uint64_t>();
@@ -153,7 +153,7 @@ bool LogAnalyzer::_extractImuData()
 bool LogAnalyzer::_extractGpsData()
 {
     QString err;
-    ULogUtility::iterateMessages(
+    PX4ULogUtility::iterateMessages(
         _fileData.constData(), _fileData.size(), "vehicle_gps_position",
         [this](const ulog_cpp::TypedDataView &s) {
             GpsSample g;
@@ -174,7 +174,7 @@ bool LogAnalyzer::_extractGpsData()
 bool LogAnalyzer::_extractBatteryData()
 {
     QString err;
-    ULogUtility::iterateMessages(
+    PX4ULogUtility::iterateMessages(
         _fileData.constData(), _fileData.size(), "battery_status",
         [this](const ulog_cpp::TypedDataView &s) {
             BatterySample b;
@@ -194,7 +194,7 @@ bool LogAnalyzer::_extractBatteryData()
 bool LogAnalyzer::_extractEkfData()
 {
     QString err;
-    ULogUtility::iterateMessages(
+    PX4ULogUtility::iterateMessages(
         _fileData.constData(), _fileData.size(), "estimator_status",
         [this](const ulog_cpp::TypedDataView &s) {
             EkfSample e;
@@ -254,7 +254,7 @@ bool LogAnalyzer::_extractFlightModeData()
     QString err;
 
     // PX4: vehicle_status.nav_state
-    ULogUtility::iterateMessages(
+    PX4ULogUtility::iterateMessages(
         _fileData.constData(), _fileData.size(), "vehicle_status",
         [this](const ulog_cpp::TypedDataView &s) {
             FlightModeSample m;
@@ -275,7 +275,7 @@ bool LogAnalyzer::_extractOpticalFlowData()
 
     // Try both possible ULog topic names
     for (const char *topic : {"vehicle_optical_flow", "optical_flow"}) {
-        ULogUtility::iterateMessages(
+        PX4ULogUtility::iterateMessages(
             _fileData.constData(), _fileData.size(), topic,
             [this](const ulog_cpp::TypedDataView &s) {
                 OpticalFlowSample o;
@@ -413,8 +413,8 @@ void LogAnalyzer::setAnalysisDimensions(const QStringList &dims)
 void LogAnalyzer::_extractDataFlashData()
 {
     // Parse FMT messages first (two-pass: learn format definitions, then extract data)
-    QMap<uint8_t, DataFlashUtility::MessageFormat> formats;
-    DataFlashUtility::parseFmtMessages(_fileData.constData(), _fileData.size(), formats);
+    QMap<uint8_t, APMDataFlashUtility::MessageFormat> formats;
+    APMDataFlashUtility::parseFmtMessages(_fileData.constData(), _fileData.size(), formats);
 
     // Map format name → type for quick lookup
     QHash<QString, uint8_t> nameToType;
@@ -430,10 +430,10 @@ void LogAnalyzer::_extractDataFlashData()
     const QStringList modeNames = {"MODE"};
     const QStringList flowNames = {"OFD", "FLOW"};
 
-    DataFlashUtility::iterateMessages(
+    APMDataFlashUtility::iterateMessages(
         _fileData.constData(), _fileData.size(), formats,
-        [&](uint8_t /*msgType*/, const char *payload, int /*payloadSize*/, const DataFlashUtility::MessageFormat &fmt) {
-            auto fields = DataFlashUtility::parseMessage(payload, fmt);
+        [&](uint8_t /*msgType*/, const char *payload, int /*payloadSize*/, const APMDataFlashUtility::MessageFormat &fmt) {
+            auto fields = APMDataFlashUtility::parseMessage(payload, fmt);
             QString name = fmt.name.toUpper();
 
             if (imuNames.contains(name)) {

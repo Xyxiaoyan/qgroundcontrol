@@ -12,6 +12,48 @@
 
 QGC_LOGGING_CATEGORY(LLMClientLog, "qgc.agent.llm")
 
+/// Format HTTP/network errors into user-friendly Chinese messages with fix suggestions.
+static QString _formatHttpError(int statusCode, const QString &body, QNetworkReply::NetworkError netErr)
+{
+    // Timeout
+    if (netErr == QNetworkReply::OperationCanceledError || netErr == QNetworkReply::TimeoutError) {
+        return QStringLiteral("请求超时，请检查网络连接或更换网络后重试");
+    }
+
+    // HTTP status code based errors
+    switch (statusCode) {
+    case 401:
+        return QStringLiteral("API Key 无效或已过期 (401)。请检查密钥是否正确，是否复制完整");
+    case 403:
+        return QStringLiteral("访问被禁止 (403)。可能是 Key 权限不足、账户欠费或 IP 地区限制");
+    case 404:
+        return QStringLiteral("API 地址错误 (404)。请检查 Base URL 是否正确，供应商是否匹配");
+    case 429:
+        return QStringLiteral("请求过于频繁 (429)。已触发限流，请等待几秒后重试");
+    case 500:
+    case 502:
+    case 503:
+        return QStringLiteral("服务器内部错误 (%1)。供应商服务暂时不可用，请稍后重试").arg(statusCode);
+    }
+
+    // Network-level errors (no HTTP status)
+    if (statusCode == 0) {
+        if (netErr == QNetworkReply::HostNotFoundError) {
+            return QStringLiteral("无法连接到服务器：域名无法解析。请检查 Base URL 是否正确");
+        }
+        if (netErr == QNetworkReply::ConnectionRefusedError) {
+            return QStringLiteral("连接被拒绝。请确认服务是否已启动（如本地 Ollama 需先运行 ollama serve）");
+        }
+        if (netErr == QNetworkReply::SslHandshakeFailedError) {
+            return QStringLiteral("SSL 证书验证失败。请检查系统时间是否正确");
+        }
+        return QStringLiteral("网络错误: %1").arg(body.left(150));
+    }
+
+    // Fallback: show status code + truncated body
+    return QStringLiteral("API 错误 (%1): %2").arg(statusCode).arg(body.left(200));
+}
+
 LLMClient::LLMClient(QObject *parent)
     : QObject(parent)
     , _network(new QNetworkAccessManager(this))
@@ -130,7 +172,8 @@ void LLMClient::fetchModels(const QString &endpoint, const QString &apiKey)
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            emit requestError(QStringLiteral("获取模型列表失败: %1").arg(reply->errorString()));
+            int sc = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            emit requestError(_formatHttpError(sc, reply->errorString(), reply->error()));
             return;
         }
 
@@ -470,18 +513,11 @@ void LLMClient::_onReplyFinished()
                           << "error=" << reply->error() << "dataSize=" << data.size()
                           << "streamBuf=" << _streamBuffer.size();
 
-    // Always check HTTP status first, with response body for debugging
-    if (statusCode != 200 && statusCode != 0) {
-        QString bodyPreview = QString::fromUtf8(data).left(300);
-        emit requestError(QStringLiteral("API %1: %2").arg(statusCode).arg(bodyPreview));
-        reply->deleteLater();
-        return;
-    }
-
-    if (reply->error() != QNetworkReply::NoError) {
+    // Check for HTTP errors or network errors
+    if (statusCode != 200 || reply->error() != QNetworkReply::NoError) {
         if (reply->error() != QNetworkReply::OperationCanceledError) {
-            QString bodyPreview = QString::fromUtf8(data).left(200);
-            emit requestError(QStringLiteral("网络错误: %1 %2").arg(reply->errorString(), bodyPreview));
+            QString bodyStr = QString::fromUtf8(data);
+            emit requestError(_formatHttpError(statusCode, bodyStr, reply->error()));
         }
         reply->deleteLater();
         return;
