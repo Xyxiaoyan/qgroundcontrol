@@ -104,7 +104,7 @@ QJsonObject LocationTool::execute(const QJsonObject &parameters)
 
     result[QStringLiteral("status")] = QStringLiteral("success");
     result[QStringLiteral("address")] = address;
-    result[QStringLiteral("context")] = QStringLiteral("当前位置: %1").arg(address);
-    result[QStringLiteral("result")] = QStringLiteral("当前位置: %1").arg(address);
+    result[QStringLiteral("context")] = QStringLiteral("Current location: %1").arg(address);
+    result[QStringLiteral("result")] = QStringLiteral("Current location: %1").arg(address);
     return result;
 }

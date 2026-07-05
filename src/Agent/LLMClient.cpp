@@ -17,41 +17,41 @@ static QString _formatHttpError(int statusCode, const QString &body, QNetworkRep
 {
     // Timeout
     if (netErr == QNetworkReply::OperationCanceledError || netErr == QNetworkReply::TimeoutError) {
-        return QStringLiteral("请求超时，请检查网络连接或更换网络后重试");
+        return QStringLiteral("Request timeout. Please check your network connection and retry");
     }
 
     // HTTP status code based errors
     switch (statusCode) {
     case 401:
-        return QStringLiteral("API Key 无效或已过期 (401)。请检查密钥是否正确，是否复制完整");
+        return QStringLiteral("Invalid or expired API Key (401). Please verify the key is correct and fully copied");
     case 403:
-        return QStringLiteral("访问被禁止 (403)。可能是 Key 权限不足、账户欠费或 IP 地区限制");
+        return QStringLiteral("Access forbidden (403). Possible causes: insufficient key permissions, account arrears, or IP region restriction");
     case 404:
-        return QStringLiteral("API 地址错误 (404)。请检查 Base URL 是否正确，供应商是否匹配");
+        return QStringLiteral("API endpoint error (404). Please check the Base URL is correct and the provider matches");
     case 429:
-        return QStringLiteral("请求过于频繁 (429)。已触发限流，请等待几秒后重试");
+        return QStringLiteral("Rate limited (429). Please wait a few seconds and retry");
     case 500:
     case 502:
     case 503:
-        return QStringLiteral("服务器内部错误 (%1)。供应商服务暂时不可用，请稍后重试").arg(statusCode);
+        return QStringLiteral("Internal server error (%1). Provider service temporarily unavailable, please retry later").arg(statusCode);
     }
 
     // Network-level errors (no HTTP status)
     if (statusCode == 0) {
         if (netErr == QNetworkReply::HostNotFoundError) {
-            return QStringLiteral("无法连接到服务器：域名无法解析。请检查 Base URL 是否正确");
+            return QStringLiteral("Cannot connect to server: DNS resolution failed. Please check the Base URL is correct");
         }
         if (netErr == QNetworkReply::ConnectionRefusedError) {
-            return QStringLiteral("连接被拒绝。请确认服务是否已启动（如本地 Ollama 需先运行 ollama serve）");
+            return QStringLiteral("Connection refused. Please confirm the service is running (e.g., for local Ollama, run 'ollama serve' first)");
         }
         if (netErr == QNetworkReply::SslHandshakeFailedError) {
-            return QStringLiteral("SSL 证书验证失败。请检查系统时间是否正确");
+            return QStringLiteral("SSL certificate verification failed. Please check system time is correct");
         }
-        return QStringLiteral("网络错误: %1").arg(body.left(150));
+        return QStringLiteral("Network error: %1").arg(body.left(150));
     }
 
     // Fallback: show status code + truncated body
-    return QStringLiteral("API 错误 (%1): %2").arg(statusCode).arg(body.left(200));
+    return QStringLiteral("API error (%1): %2").arg(statusCode).arg(body.left(200));
 }
 
 LLMClient::LLMClient(QObject *parent)
@@ -62,6 +62,33 @@ LLMClient::LLMClient(QObject *parent)
 LLMClient::~LLMClient()
 {
     cancelRequest();
+}
+
+int LLMClient::estimateTokens(const QString &text)
+{
+    // Rough heuristic: ~4 chars per token for English text.
+    // JSON structure (keys, braces) adds overhead, so use 3.5 chars/token.
+    return qMax(1, static_cast<int>(text.length() / 3.5));
+}
+
+int LLMClient::estimateMessagesTokens(const QJsonArray &messages)
+{
+    int total = 0;
+    for (const auto &msgVal : messages) {
+        const QJsonObject msg = msgVal.toObject();
+        // Role string overhead (~4 tokens per message for role + delimiters)
+        total += 4;
+        const QString content = msg.value(QStringLiteral("content")).toString();
+        if (!content.isEmpty()) total += estimateTokens(content);
+        // Tool calls have arguments
+        const auto toolCalls = msg.value(QStringLiteral("tool_calls")).toArray();
+        for (const auto &tc : toolCalls) {
+            const auto fn = tc.toObject().value(QStringLiteral("function")).toObject();
+            total += estimateTokens(fn.value(QStringLiteral("name")).toString());
+            total += estimateTokens(fn.value(QStringLiteral("arguments")).toString());
+        }
+    }
+    return total;
 }
 
 void LLMClient::sendRequest(const QString &endpoint, const QString &apiKey, const QString &model,
@@ -180,7 +207,7 @@ void LLMClient::fetchModels(const QString &endpoint, const QString &apiKey)
         QJsonParseError error;
         QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &error);
         if (error.error != QJsonParseError::NoError) {
-            emit requestError(QStringLiteral("解析模型列表失败"));
+            emit requestError(QStringLiteral("Failed to parse model list"));
             return;
         }
 
@@ -193,7 +220,7 @@ void LLMClient::fetchModels(const QString &endpoint, const QString &apiKey)
             }
         }
         if (models.isEmpty()) {
-            emit requestError(QStringLiteral("未找到可用模型"));
+            emit requestError(QStringLiteral("No available models found"));
             return;
         }
         emit modelsFetched(models);

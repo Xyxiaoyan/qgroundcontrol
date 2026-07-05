@@ -12,7 +12,7 @@ QString CameraProvider::buildCameraContext() const
     if (!vm) return {};
 
     QString ctx;
-    ctx += QStringLiteral("\n## 摄像头与视频\n");
+    ctx += QStringLiteral("\n## Camera & Video\n");
     ctx += _collectVideoStatus();
     return ctx;
 }
@@ -20,16 +20,16 @@ QString CameraProvider::buildCameraContext() const
 QString CameraProvider::_collectVideoStatus() const
 {
     auto *vm = VideoManager::instance();
-    if (!vm) return QStringLiteral("- 视频系统未就绪\n");
+    if (!vm) return QStringLiteral("- Video system not ready\n");
 
     QString s;
-    s += QStringLiteral("- 视频连接: %1\n").arg(vm->hasVideo() ? QStringLiteral("已连接") : QStringLiteral("未连接"));
+    s += QStringLiteral("- Video: %1\n").arg(vm->hasVideo() ? QStringLiteral("Connected") : QStringLiteral("Not connected"));
     if (vm->hasVideo()) {
-        s += QStringLiteral("- 推流状态: %1\n").arg(vm->streaming() ? QStringLiteral("直播中") : QStringLiteral("已暂停"));
-        s += QStringLiteral("- 录制状态: %1\n").arg(vm->recording() ? QStringLiteral("录制中") : QStringLiteral("未录制"));
-        s += QStringLiteral("- 分辨率: %1x%2\n").arg(vm->videoSize().width()).arg(vm->videoSize().height());
-        s += QStringLiteral("- 视场角: %1°\n").arg(vm->hfov(), 0, 'f', 1);
-        s += QStringLiteral("- 热成像: %1\n").arg(vm->hasThermal() ? QStringLiteral("有") : QStringLiteral("无"));
+        s += QStringLiteral("- Streaming: %1\n").arg(vm->streaming() ? QStringLiteral("Live") : QStringLiteral("Paused"));
+        s += QStringLiteral("- Recording: %1\n").arg(vm->recording() ? QStringLiteral("Recording") : QStringLiteral("Not recording"));
+        s += QStringLiteral("- Resolution: %1x%2\n").arg(vm->videoSize().width()).arg(vm->videoSize().height());
+        s += QStringLiteral("- FOV: %1deg\n").arg(vm->hfov(), 0, 'f', 1);
+        s += QStringLiteral("- Thermal: %1\n").arg(vm->hasThermal() ? QStringLiteral("Yes") : QStringLiteral("No"));
     }
     return s;
 }

@@ -48,6 +48,12 @@ target_sources(${CMAKE_PROJECT_NAME}
         Tools/LocationTool.h
         Tools/MissionTool.cpp
         Tools/MissionTool.h
+        Tools/RetrieveKnowledgeTool.cpp
+        Tools/RetrieveKnowledgeTool.h
+        CloudRAGClient.cpp
+        CloudRAGClient.h
+        ArchiveManager.cpp
+        ArchiveManager.h
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/Tools)

@@ -18,6 +18,8 @@ class LogAnalyzer;
 class OnboardLogController;
 class ReActLoop;
 class ToolRegistry;
+class CloudRAGClient;
+class ArchiveManager;
 
 class AgentManager : public QObject
 {
@@ -48,6 +50,9 @@ public:
     Q_PROPERTY(QString thinkingText READ thinkingText NOTIFY thinkingTextChanged)
     Q_PROPERTY(LogAnalysisModel *logAnalysisModel READ logAnalysisModel NOTIFY logAnalysisModelChanged)
     Q_PROPERTY(int connectionStatus READ connectionStatus NOTIFY connectionStatusChanged)
+    Q_PROPERTY(bool ragEnabled READ ragEnabled WRITE setRagEnabled NOTIFY ragEnabledChanged)
+    Q_PROPERTY(QString ragEndpoint READ ragEndpoint WRITE setRagEndpoint NOTIFY ragEndpointChanged)
+    Q_PROPERTY(QString ragApiKey READ ragApiKey WRITE setRagApiKey NOTIFY ragApiKeyChanged)
 
     bool isProcessing() const { return _isProcessing; }
     QString errorMessage() const { return _errorMessage; }
@@ -58,6 +63,10 @@ public:
     QString thinkingText() const { return _thinkingAccum; }
     LogAnalysisModel *logAnalysisModel() const { return _logAnalysisModel; }
     int connectionStatus() const { return _connectionStatus; }
+
+    bool ragEnabled() const;
+    QString ragEndpoint() const;
+    QString ragApiKey() const;
 
     Q_INVOKABLE void sendMessage(const QString &userMessage);
     Q_INVOKABLE void cancelRequest();
@@ -86,6 +95,19 @@ public:
     Q_INVOKABLE void clearConversationHistory();
     Q_INVOKABLE bool hasConversationHistory() const;
 
+    // RAG configuration
+    Q_INVOKABLE void setRagEnabled(bool enabled);
+    Q_INVOKABLE void setRagEndpoint(const QString &url);
+    Q_INVOKABLE void setRagApiKey(const QString &key);
+    Q_INVOKABLE void testRagConnection();
+
+    // Chat archive
+    Q_INVOKABLE QString archiveCurrentChat();
+    Q_INVOKABLE QVariantList listArchives() const;
+    Q_INVOKABLE QVariantList loadArchiveMessages(const QString &id) const;
+    Q_INVOKABLE bool deleteArchive(const QString &id);
+    Q_INVOKABLE int archiveCount() const;
+
 signals:
     void messageReceived(const QString &role, const QString &content);
     void streamingChunk(const QString &text);
@@ -112,6 +134,11 @@ signals:
     void onboardDownloadComplete(const QString &filePath);
     void modelsFetched(const QJsonArray &models);
     void connectionStatusChanged();
+    void ragEnabledChanged();
+    void ragEndpointChanged();
+    void ragApiKeyChanged();
+    void ragTestResult(const QString &message);
+    void archiveListChanged();
 
 public slots:
     Q_INVOKABLE void confirmCommand(const QVariantMap &cmdMap);
@@ -146,6 +173,8 @@ private:
     OnboardLogController *_onboardLogCtrl = nullptr;
     ToolRegistry *_toolRegistry = nullptr;
     ReActLoop *_reactLoop = nullptr;
+    CloudRAGClient *_ragClient = nullptr;
+    ArchiveManager *_archiveManager = nullptr;
 
     QJsonArray _downloadedLogsCache;
     QString _onboardDownloadDir;
