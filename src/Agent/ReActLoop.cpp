@@ -4,6 +4,7 @@
 #include "AgentTool.h"
 #include "ContextProvider.h"
 #include "ConversationHistory.h"
+#include "CloudRAGClient.h"
 #include "Vehicle.h"
 #include "VehicleGPSFactGroup.h"
 #include "BatteryFactGroupListModel.h"
@@ -66,13 +67,26 @@ void ReActLoop::start(const QString &userMessage, bool autonomous)
     QString context = _ctx ? _ctx->buildVehicleContext() : QString();
     QString enrichedUserMsg = userMessage;
     if (!context.isEmpty()) {
-        enrichedUserMsg += QStringLiteral("\n\n[当前飞行器状态]\n") + context;
+        enrichedUserMsg += QStringLiteral("\n\n[Current Vehicle Status]\n") + context;
     }
 
     _appendMessage(QJsonObject{
         {QStringLiteral("role"), QStringLiteral("user")},
         {QStringLiteral("content"), enrichedUserMsg}
     });
+
+    // Auto-inject RAG knowledge (synchronous, blocks until retrieval completes)
+    if (_rag && _rag->isEnabled() && !_rag->ragEndpoint().isEmpty()) {
+        QList<CloudRAGClient::RAGResult> ragResults = _rag->retrieveSync(userMessage, 3, 0.3);
+        if (!ragResults.isEmpty()) {
+            QString ragContext = CloudRAGClient::formatContext(ragResults);
+            // Append as a separate system message for context
+            _appendMessage(QJsonObject{
+                {QStringLiteral("role"), QStringLiteral("system")},
+                {QStringLiteral("content"), QStringLiteral("The following relevant professional knowledge was retrieved from the knowledge base for reference:") + ragContext}
+            });
+        }
+    }
 
     emit started();
     _step();
@@ -122,7 +136,7 @@ void ReActLoop::_step()
 {
     if (!_isRunning) return;
     if (_maxIterations > 0 && _iteration >= _maxIterations) {
-        _handleFinalResponse(QStringLiteral("[达到最大迭代次数 %1]").arg(_maxIterations));
+        _handleFinalResponse(QStringLiteral("[Max iterations %1 reached]").arg(_maxIterations));
         return;
     }
 
@@ -138,6 +152,9 @@ void ReActLoop::_sendToLLM()
         _onLLMError(QStringLiteral("API endpoint or key not set"));
         return;
     }
+
+    // Trim messages to stay within context token budget
+    _trimForContextLimit();
 
     QJsonArray tools = _tools->generateOpenAITools();
     _llm->sendFunctionRequest(_apiEndpoint, _apiKey, _modelName,
@@ -398,15 +415,15 @@ QJsonObject ReActLoop::_checkToolSafety(const QString &toolName, const QJsonObje
 void ReActLoop::_handleFinalResponse(const QString &content)
 {
     qWarning() << "\n********** ReAct 最终回答 **********";
-    qWarning().noquote() << (content.isEmpty() ? QStringLiteral("[任务完成]") : content);
+    qWarning().noquote() << (content.isEmpty() ? QStringLiteral("[Task complete]") : content);
     qWarning() << "**************************************\n";
 
     if (content.isEmpty()) {
-        emit finalAnswer(QStringLiteral("[任务完成]"));
+        emit finalAnswer(QStringLiteral("[Task complete]"));
     } else {
         emit finalAnswer(content);
     }
-    emit messageProduced(QStringLiteral("assistant"), content.isEmpty() ? QStringLiteral("[任务完成]") : content);
+    emit messageProduced(QStringLiteral("assistant"), content.isEmpty() ? QStringLiteral("[Task complete]") : content);
     _isRunning = false;
 
     // Persist conversation history for the next turn
@@ -475,12 +492,61 @@ void ReActLoop::_appendToolResult(const QString &toolName, const QJsonObject &ob
     _appendMessage(toolMsg);
 }
 
+void ReActLoop::_trimForContextLimit()
+{
+    if (_messages.size() <= 2) return;
+
+    int totalTokens = LLMClient::estimateMessagesTokens(_messages);
+    // Reserve ~2000 tokens for tools schema + system prompt overhead
+    int budget = _maxContextTokens - 2000;
+    if (totalTokens <= budget) return;
+
+    // Keep system message (index 0) + most recent messages
+    QJsonObject systemMsg = _messages.first().toObject();
+    int start = 1;
+
+    // Iteratively remove oldest messages until within budget
+    while (start < _messages.size() - 2 && totalTokens > budget) {
+        const QJsonObject &msg = _messages[start].toObject();
+        totalTokens -= LLMClient::estimateTokens(msg.value(QStringLiteral("content")).toString()) + 4;
+        // Also subtract tool_calls tokens if present
+        const auto toolCalls = msg.value(QStringLiteral("tool_calls")).toArray();
+        for (const auto &tc : toolCalls) {
+            const auto fn = tc.toObject().value(QStringLiteral("function")).toObject();
+            totalTokens -= LLMClient::estimateTokens(fn.value(QStringLiteral("arguments")).toString());
+        }
+        start++;
+    }
+
+    // Don't orphan tool messages: if the first kept message is "tool" role,
+    // walk back to include its preceding "assistant" with tool_calls
+    while (start < _messages.size()
+           && _messages[start].toObject().value(QStringLiteral("role")).toString()
+                  == QStringLiteral("tool")) {
+        start--;
+        if (start <= 0) { start = 1; break; }
+    }
+
+    if (start <= 1) return;  // Nothing to trim
+
+    QJsonArray trimmed;
+    trimmed.append(systemMsg);
+    for (int i = start; i < _messages.size(); i++) {
+        trimmed.append(_messages[i].toObject());
+    }
+    _messages = trimmed;
+
+    qWarning() << "[Context] Trimmed:" << (start - 1)
+                << "messages removed, now" << _messages.size()
+                << "messages, est." << totalTokens << "tokens";
+}
+
 QString ReActLoop::_buildSystemPrompt() const
 {
     QString prompt;
     prompt += QStringLiteral(
         "You are AgentQGC AI, a professional drone flight assistant. You control the drone via function calling.\n"
-        "VERY IMPORTANT: Always respond in Chinese. The user speaks Chinese.\n\n"
+        "Always respond in English.\n\n"
         "## Core Rules (MUST follow!)\n"
         "1. Start every task with get_vehicle_state to assess current conditions\n"
         "2. You can call the same tool multiple times in one turn by providing multiple JSON objects: "
@@ -509,7 +575,8 @@ QString ReActLoop::_buildSystemPrompt() const
         "- altitude_speed: {\"parameter\": \"altitude|speed\", \"value\": 10}\n"
         "- mavlink_command: {\"command_name\": \"MAV_CMD_XXX\", \"params\": [p1,p2,...], \"use_int\": false}\n"
         "- analyze_flight_log: {\"analysis_type\": \"vibration|gps|battery|ekf|all\"}\n"
-        "- get_location_address: mode=\"reverse\" (default) or mode=\"forward\" with address=\"地点名\"\n\n"
+        "- get_location_address: mode=\"reverse\" (default) or mode=\"forward\" with address=\"place name\"\n"
+        "- retrieve_knowledge: {\"query\": \"search keywords\", \"top_k\": 5} — Search the professional knowledge base for PID tuning, sensor principles, troubleshooting, MAVLink protocol, etc. Call actively when auto-injected snippets are insufficient\n\n"
         "## PX4 Flight Workflow (when firmware is PX4 Pro)\n"
         "To take off and fly: flight_mode(mode=\"Hold\") → flight_control(action=\"takeoff\") → flight_control(action=\"goto\", param1=lat, param2=lon)\n\n"
         "## Safety Rules\n"

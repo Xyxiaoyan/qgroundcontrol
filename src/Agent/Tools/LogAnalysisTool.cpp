@@ -57,7 +57,7 @@ QJsonObject LogAnalysisTool::execute(const QJsonObject &parameters)
 
     result[QStringLiteral("status")] = QStringLiteral("success");
     result[QStringLiteral("report")] = _analyzer->generateReport(analysisResult);
-    result[QStringLiteral("result")] = QStringLiteral("日志分析完成 (%1)").arg(analysisType);
+    result[QStringLiteral("result")] = QStringLiteral("Log analysis complete (%1)").arg(analysisType);
 
     // Include key stats
     if (analysisType == QStringLiteral("vibration") || analysisType == QStringLiteral("all")) {

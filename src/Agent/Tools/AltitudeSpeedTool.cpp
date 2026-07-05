@@ -58,10 +58,10 @@ QJsonObject AltitudeSpeedTool::execute(const QJsonObject &parameters)
     try {
         if (param == QStringLiteral("altitude")) {
             v->guidedModeChangeAltitude(value, true);
-            result[QStringLiteral("result")] = QStringLiteral("✓ 高度变化 %1m").arg(value);
+            result[QStringLiteral("result")] = QStringLiteral("✓ Altitude changed %1m").arg(value);
         } else if (param == QStringLiteral("speed")) {
             v->guidedModeChangeGroundSpeedMetersSecond(value);
-            result[QStringLiteral("result")] = QStringLiteral("✓ 地速设为 %1m/s").arg(value);
+            result[QStringLiteral("result")] = QStringLiteral("✓ Ground speed set to %1m/s").arg(value);
         } else {
             result[QStringLiteral("error")] = QStringLiteral("Unknown parameter: %1").arg(param);
         }

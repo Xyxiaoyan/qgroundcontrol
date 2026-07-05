@@ -35,6 +35,6 @@ QJsonObject VehicleContextTool::execute(const QJsonObject &parameters)
     }
     result[QStringLiteral("status")] = QStringLiteral("success");
     result[QStringLiteral("context")] = _ctx->buildVehicleContext();
-    result[QStringLiteral("result")] = QStringLiteral("已获取飞行器状态");
+    result[QStringLiteral("result")] = QStringLiteral("Vehicle state retrieved");
     return result;
 }

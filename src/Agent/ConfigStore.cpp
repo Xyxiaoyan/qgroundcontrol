@@ -61,6 +61,42 @@ void ConfigStore::setGeocodeApiKey(const QString &key)
     }
 }
 
+QString ConfigStore::ragEndpoint() const
+{
+    return _settings.value(kKeyRagEndpoint).toString();
+}
+
+void ConfigStore::setRagEndpoint(const QString &url)
+{
+    _settings.setValue(kKeyRagEndpoint, url);
+}
+
+QString ConfigStore::ragApiKey() const
+{
+    const QByteArray encrypted = _settings.value(kKeyRagApiKey).toByteArray();
+    if (encrypted.isEmpty()) return {};
+    return _decrypt(encrypted);
+}
+
+void ConfigStore::setRagApiKey(const QString &key)
+{
+    if (key.isEmpty()) {
+        _settings.remove(kKeyRagApiKey);
+    } else {
+        _settings.setValue(kKeyRagApiKey, _encrypt(key));
+    }
+}
+
+bool ConfigStore::ragEnabled() const
+{
+    return _settings.value(kKeyRagEnabled, false).toBool();
+}
+
+void ConfigStore::setRagEnabled(bool enabled)
+{
+    _settings.setValue(kKeyRagEnabled, enabled);
+}
+
 QByteArray ConfigStore::_deriveKey() const
 {
     static const QByteArray salt("AgentQGC.Agent.2026");

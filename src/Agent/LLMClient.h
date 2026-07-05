@@ -26,6 +26,10 @@ public:
     void fetchModels(const QString &endpoint, const QString &apiKey);
     void cancelRequest();
 
+    // Rough token estimation (~4 chars/token for English text)
+    static int estimateTokens(const QString &text);
+    static int estimateMessagesTokens(const QJsonArray &messages);
+
 signals:
     void responseReceived(const QString &content);
     void responseReceivedWithTools(const QString &content, const QJsonObject &functionCall);

@@ -29,19 +29,19 @@ QString ContextProvider::buildVehicleContext()
 {
     Vehicle *v = MultiVehicleManager::instance()->activeVehicle();
     if (!v) {
-        return QStringLiteral("无飞行器连接。");
+        return QStringLiteral("No vehicle connected.");
     }
 
     QString ctx;
-    ctx += QStringLiteral("## 飞行器状态\n");
+    ctx += QStringLiteral("## Vehicle Status\n");
     ctx += _collectBasicInfo(v);
-    ctx += QStringLiteral("\n## 姿态与运动\n");
+    ctx += QStringLiteral("\n## Attitude & Motion\n");
     ctx += _collectAttitudeData(v);
-    ctx += QStringLiteral("\n## 电池\n");
+    ctx += QStringLiteral("\n## Battery\n");
     ctx += _collectBatteryData(v);
     ctx += QStringLiteral("\n## GPS\n");
     ctx += _collectGpsData(v);
-    ctx += QStringLiteral("\n## 健康与通讯\n");
+    ctx += QStringLiteral("\n## Health & Comms\n");
     ctx += _collectHealthData(v);
     ctx += _collectParameterSummary(v);
     ctx += _map->buildMapContext(v);
@@ -88,9 +88,9 @@ QString ContextProvider::_buildTrendContext(Vehicle *v)
     qint64 elapsedMs = _trendTimer.restart();
     float elapsedMin = static_cast<float>(elapsedMs) / 60000.0f;
 
-    s += QStringLiteral("\n## 趋势分析 (间隔 %1s)\n").arg(elapsedMs / 1000, 0);
+    s += QStringLiteral("\n## Trend Analysis (interval %1s)\n").arg(elapsedMs / 1000, 0);
     if (elapsedMs < 500) {
-        s += QStringLiteral("- 采样间隔过短，趋势数据不可靠\n");
+        s += QStringLiteral("- Sampling interval too short, trend data unreliable\n");
         return s;
     }
 
@@ -99,17 +99,17 @@ QString ContextProvider::_buildTrendContext(Vehicle *v)
         float deltaBat = batPct - _prevBatteryPct;
         if (qAbs(deltaBat) > 0.5f) {
             float rate = deltaBat / elapsedMin;
-            s += QStringLiteral("- ⚡电池: %1%→%2% (%3%/min)\n")
+            s += QStringLiteral("- Battery: %1%->%2% (%3%/min)\n")
                 .arg(_prevBatteryPct, 0, 'f', 1).arg(batPct, 0, 'f', 1)
                 .arg(qAbs(rate), 0, 'f', 2);
-            if (rate < -3.0f) s += QStringLiteral("  ⚠ 电量消耗过快!\n");
+            if (rate < -3.0f) s += QStringLiteral("  WARNING: Battery draining too fast!\n");
         }
     }
 
     // Altitude trend
     if (qAbs(altRel - _prevAltRel) > 0.5f) {
         float altRate = (altRel - _prevAltRel) / elapsedMin;
-        s += QStringLiteral("- 📐高度: %1m→%2m (%3m/min)\n")
+        s += QStringLiteral("- Altitude: %1m->%2m (%3m/min)\n")
             .arg(_prevAltRel, 0, 'f', 1).arg(altRel, 0, 'f', 1)
             .arg(altRate, 0, 'f', 1);
     }
@@ -118,11 +118,11 @@ QString ContextProvider::_buildTrendContext(Vehicle *v)
     if (_prevGpsCount >= 0 && gpsCount >= 0) {
         int deltaGps = gpsCount - _prevGpsCount;
         if (deltaGps != 0) {
-            s += QStringLiteral("- 🛰 GPS卫星: %1→%2\n").arg(_prevGpsCount).arg(gpsCount);
+            s += QStringLiteral("- GPS sats: %1->%2\n").arg(_prevGpsCount).arg(gpsCount);
         }
         if (_prevGpsLock != gpsLock) {
             QString lvl[] = {QStringLiteral("NoGPS"), QStringLiteral("NoFix"), QStringLiteral("2D"), QStringLiteral("3D")};
-            s += QStringLiteral("- 🛰 GPS定位: %1→%2\n")
+            s += QStringLiteral("- GPS lock: %1->%2\n")
                 .arg((_prevGpsLock >= 0 && _prevGpsLock < 4) ? lvl[_prevGpsLock] : QStringLiteral("?"))
                 .arg((gpsLock >= 0 && gpsLock < 4) ? lvl[gpsLock] : QStringLiteral("?"));
         }
@@ -138,21 +138,20 @@ QString ContextProvider::_buildTrendContext(Vehicle *v)
     return s;
 }
 
-QString ContextProvider::_collectBasicInfo(Vehicle *v) // v是一个指向Vehicle对象的指针
+QString ContextProvider::_collectBasicInfo(Vehicle *v)
 {
     QString s;
-    s += QStringLiteral("- 固件: %1 | 类型: %2\n")
+    s += QStringLiteral("- Firmware: %1 | Type: %2\n")
          .arg(v->firmwareTypeString(), v->vehicleTypeString());
-    s += QStringLiteral("- 解锁: %1 | 飞行中: %2 | 模式: %3 | ready: %4\n")
-         .arg(v->armed() ? QStringLiteral("是") : QStringLiteral("否"),
-              v->flying() ? QStringLiteral("是") : QStringLiteral("否"),
+    s += QStringLiteral("- Armed: %1 | Flying: %2 | Mode: %3 | Ready: %4\n")
+         .arg(v->armed() ? QStringLiteral("Yes") : QStringLiteral("No"),
+              v->flying() ? QStringLiteral("Yes") : QStringLiteral("No"),
               v->flightMode(),
               v->readyToFly() ? QStringLiteral("ok") : QStringLiteral("no"));
-    // 向 LLM 提供飞行器实际支持的完整飞行模式列表
-    // 这比 System Prompt 中的硬编码列表更准确，因为不同固件版本/机型的模式可能不同
+    // Provide the full list of flight modes supported by the vehicle
     QStringList flightModes = v->flightModes();
     if (!flightModes.isEmpty()) {
-        s += QStringLiteral("- 可用模式: %1\n").arg(flightModes.join(QStringLiteral(", ")));
+        s += QStringLiteral("- Available modes: %1\n").arg(flightModes.join(QStringLiteral(", ")));
     }
     return s;
 }
@@ -171,7 +170,7 @@ QString ContextProvider::_collectAttitudeData(Vehicle *v)
 
     s += QStringLiteral("- roll:%1° pitch:%2° heading:%3°\n")
          .arg(roll, 0, 'f', 1).arg(pitch, 0, 'f', 1).arg(heading, 0, 'f', 0);
-    s += QStringLiteral("- 地速:%1m/s 爬升:%2m/s 高度:%3m 离家:%4m 油门:%5%\n")
+    s += QStringLiteral("- Ground speed:%1m/s Climb:%2m/s Alt:%3m Dist home:%4m Throttle:%5%\n")
          .arg(gs, 0, 'f', 1).arg(climb, 0, 'f', 1).arg(altRel, 0, 'f', 1)
          .arg(distHome, 0, 'f', 0).arg(throttle, 0, 'f', 0);
     return s;
@@ -181,10 +180,10 @@ QString ContextProvider::_collectBatteryData(Vehicle *v)
 {
     auto *batteries = v->batteries();
     if (!batteries || batteries->count() == 0) {
-        return QStringLiteral("- 无电池数据\n");
+        return QStringLiteral("- No battery data\n");
     }
     auto *batGroup = dynamic_cast<BatteryFactGroup *>(batteries->get(0));
-    if (!batGroup) return QStringLiteral("- 无电池数据\n");
+    if (!batGroup) return QStringLiteral("- No battery data\n");
 
     auto val = [](const Fact *f) -> float {
         if (!f) return -1;
@@ -199,7 +198,7 @@ QString ContextProvider::_collectBatteryData(Vehicle *v)
     float temp = val(batGroup->temperature());
 
     QString s;
-    s += QStringLiteral("- 电量:%1% | 电压:%2V | 电流:%3A | 温度:%4°C\n")
+    s += QStringLiteral("- Charge:%1% | Voltage:%2V | Current:%3A | Temp:%4C\n")
          .arg(pct >= 0 ? QString::number(pct, 'f', 0) : QStringLiteral("?"),
               volt >= 0 ? QString::number(volt, 'f', 2) : QStringLiteral("?"),
               curr >= 0 ? QString::number(curr, 'f', 1) : QStringLiteral("?"),
@@ -210,16 +209,16 @@ QString ContextProvider::_collectBatteryData(Vehicle *v)
 QString ContextProvider::_collectGpsData(Vehicle *v)
 {
     auto *gps = dynamic_cast<VehicleGPSFactGroup *>(v->gpsFactGroup());
-    if (!gps) return QStringLiteral("- 无GPS数据\n");
+    if (!gps) return QStringLiteral("- No GPS data\n");
 
     int cnt = _safeFactInt(gps->count());
-    if (cnt <= 0) return QStringLiteral("- 无GPS数据\n");
+    if (cnt <= 0) return QStringLiteral("- No GPS data\n");
 
     int lock = _safeFactInt(gps->lock());
     float hdop = _safeFactValue(gps->hdop());
 
     QString s;
-    s += QStringLiteral("- 卫星:%1 | HDOP:%2 | 定位:%3\n")
+    s += QStringLiteral("- Sats:%1 | HDOP:%2 | Lock:%3\n")
          .arg(cnt).arg(hdop, 0, 'f', 2)
          .arg(lock >= 3 ? QStringLiteral("3D Fix") : (lock >= 2 ? QStringLiteral("2D Fix") : QStringLiteral("No Lock")));
     return s;
@@ -228,11 +227,11 @@ QString ContextProvider::_collectGpsData(Vehicle *v)
 QString ContextProvider::_collectHealthData(Vehicle *v) const
 {
     QString s;
-    s += QStringLiteral("- 传感器: %1\n")
-         .arg(v->allSensorsHealthy() ? QStringLiteral("全部正常") : QStringLiteral("有异常"));
-    s += QStringLiteral("- 预解锁错误: %1\n")
-         .arg(v->prearmError().isEmpty() ? QStringLiteral("无") : v->prearmError());
-    s += QStringLiteral("- 飞行时长: %1\n").arg(v->hobbsMeter());
+    s += QStringLiteral("- Sensors: %1\n")
+         .arg(v->allSensorsHealthy() ? QStringLiteral("All normal") : QStringLiteral("Issues detected"));
+    s += QStringLiteral("- Prearm error: %1\n")
+         .arg(v->prearmError().isEmpty() ? QStringLiteral("None") : v->prearmError());
+    s += QStringLiteral("- Flight time: %1\n").arg(v->hobbsMeter());
     return s;
 }
 
@@ -246,7 +245,7 @@ QString ContextProvider::_collectParameterSummary(Vehicle *v) const
                          QStringLiteral("COM_DISARM_LAND")};
 
     QString s;
-    s += QStringLiteral("\n## 关键参数\n");
+    s += QStringLiteral("\n## Key Parameters\n");
     for (const auto &key : keys) {
         auto fact = pm->getParameter(-1, key);
         if (fact) {

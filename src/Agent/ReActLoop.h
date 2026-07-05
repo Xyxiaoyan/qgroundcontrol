@@ -10,6 +10,7 @@ class ToolRegistry;
 class ContextProvider;
 class ConversationHistory;
 class AgentTool;
+class CloudRAGClient;
 
 class ReActLoop : public QObject
 {
@@ -32,6 +33,7 @@ public:
     Q_INVOKABLE void rejectToolExecution();
 
     void setConversationHistory(ConversationHistory *history);
+    void setRagClient(CloudRAGClient *rag) { _rag = rag; }
     Q_INVOKABLE void clearHistory();
     bool hasHistory() const;
 
@@ -63,6 +65,7 @@ private:
     void _handleFinalResponse(const QString &content);
     void _appendMessage(const QJsonObject &msg);
     void _appendToolResult(const QString &toolName, const QJsonObject &observation);
+    void _trimForContextLimit();
     QString _buildSystemPrompt() const;
     QJsonObject _checkToolSafety(const QString &toolName, const QJsonObject &arguments, AgentTool *tool);
 
@@ -70,10 +73,12 @@ private:
     ToolRegistry *_tools;
     ContextProvider *_ctx;
     ConversationHistory *_history = nullptr;
+    CloudRAGClient *_rag = nullptr;
 
     QJsonArray _messages;
     int _iteration = 0;
     int _maxIterations = 0;  // 0 = no limit, model decides when to stop
+    int _maxContextTokens = 28000;  // Context window budget (leaves room for response)
     bool _isRunning = false;
     bool _autonomous = false;
     bool _awaitingConfirmation = false;

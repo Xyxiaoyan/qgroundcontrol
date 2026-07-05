@@ -113,6 +113,9 @@ Rectangle {
                 LineSeries { id: dangerLine; color: qgcPal.colorRed;    width: 1; name: "危险" }
 
                 // Gyro series — each with its own right-aligned Y-axis
+                // Note: Qt Graphs does NOT allow sharing an axis across multiple
+                // series — doing so triggers "axis already associated" + segfault.
+                // Each series gets its own axis; extras are hidden to avoid clutter.
                 LineSeries {
                     id: gyroSeriesX
                     color: qgcPal.brandingPurple
@@ -126,8 +129,30 @@ Rectangle {
                         alignment: Qt.AlignRight
                     }
                 }
-                LineSeries { id: gyroSeriesY; color: qgcPal.colorYellow;     width: 1; name: "Gyro Y"; axisY: gyroYAxis }
-                LineSeries { id: gyroSeriesZ; color: qgcPal.colorYellowGreen; width: 1; name: "Gyro Z"; axisY: gyroYAxis }
+                LineSeries {
+                    id: gyroSeriesY
+                    color: qgcPal.colorYellow
+                    width: 1
+                    name: "Gyro Y"
+                    axisY: ValueAxis {
+                        min: -5; max: 5
+                        tickInterval: 1
+                        alignment: Qt.AlignRight
+                        visible: false
+                    }
+                }
+                LineSeries {
+                    id: gyroSeriesZ
+                    color: qgcPal.colorYellowGreen
+                    width: 1
+                    name: "Gyro Z"
+                    axisY: ValueAxis {
+                        min: -5; max: 5
+                        tickInterval: 1
+                        alignment: Qt.AlignRight
+                        visible: false
+                    }
+                }
             }
 
             FlightModeOverlay {

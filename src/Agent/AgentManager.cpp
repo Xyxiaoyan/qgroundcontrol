@@ -26,6 +26,9 @@
 #include "Tools/LogAnalysisTool.h"
 #include "Tools/LocationTool.h"
 #include "Tools/MissionTool.h"
+#include "Tools/RetrieveKnowledgeTool.h"
+#include "CloudRAGClient.h"
+#include "ArchiveManager.h"
 
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -54,6 +57,7 @@ AgentManager::AgentManager(QObject *parent)
     , _history(new ConversationHistory(this))
     , _logAnalyzer(new LogAnalyzer(this))
     , _toolRegistry(new ToolRegistry(this))
+    , _ragClient(new CloudRAGClient(this))
 {
     // Register all tools
     _toolRegistry->registerTool(new VehicleContextTool(_ctx, this));
@@ -68,10 +72,12 @@ AgentManager::AgentManager(QObject *parent)
     _toolRegistry->registerTool(new LogAnalysisTool(_logAnalyzer, this));
     _toolRegistry->registerTool(new LocationTool(_ctx, this));
     _toolRegistry->registerTool(new MissionTool(this));
+    _toolRegistry->registerTool(new RetrieveKnowledgeTool(_ragClient, this));
 
     // Create ReAct loop
     _reactLoop = new ReActLoop(_llm, _toolRegistry, _ctx, this);
     _reactLoop->setConversationHistory(_history);
+    _reactLoop->setRagClient(_ragClient);
 
     // Wire ReAct signals to AgentManager facade
     connect(_reactLoop, &ReActLoop::started,             this, &AgentManager::_onReActStarted);
@@ -115,6 +121,18 @@ AgentManager::AgentManager(QObject *parent)
     if (!_geocodeApiKey.isEmpty()) {
         _ctx->setGeocodeApiKey(_geocodeApiKey);
     }
+
+    // Load RAG configuration
+    bool ragOn = _config->ragEnabled();
+    QString ragUrl = _config->ragEndpoint();
+    QString ragKey = _config->ragApiKey();
+    // Default RAG API key to main API key if not separately configured
+    if (ragKey.isEmpty()) {
+        ragKey = _apiKey;
+    }
+    _ragClient->setEnabled(ragOn);
+    _ragClient->setRagEndpoint(ragUrl);
+    _ragClient->setApiKey(ragKey);
 
     connect(MultiVehicleManager::instance(), &MultiVehicleManager::activeVehicleChanged, this,
             [this](Vehicle *v) { emit vehicleConnectedChanged(v != nullptr); });
@@ -227,11 +245,72 @@ void AgentManager::setGeocodeApiKey(const QString &key)
     }
 }
 
+bool AgentManager::ragEnabled() const
+{
+    return _ragClient ? _ragClient->isEnabled() : false;
+}
+
+QString AgentManager::ragEndpoint() const
+{
+    return _ragClient ? _ragClient->ragEndpoint() : QString();
+}
+
+QString AgentManager::ragApiKey() const
+{
+    return _ragClient ? _ragClient->apiKey() : QString();
+}
+
+void AgentManager::setRagEnabled(bool enabled)
+{
+    if (_ragClient) {
+        _ragClient->setEnabled(enabled);
+        _config->setRagEnabled(enabled);
+        emit ragEnabledChanged();
+    }
+}
+
+void AgentManager::setRagEndpoint(const QString &url)
+{
+    if (_ragClient) {
+        _ragClient->setRagEndpoint(url);
+        _config->setRagEndpoint(url);
+        emit ragEndpointChanged();
+    }
+}
+
+void AgentManager::setRagApiKey(const QString &key)
+{
+    if (_ragClient) {
+        _ragClient->setApiKey(key);
+        _config->setRagApiKey(key);
+        emit ragApiKeyChanged();
+    }
+}
+
+void AgentManager::testRagConnection()
+{
+    if (!_ragClient || !_ragClient->isEnabled()) {
+        emit ragTestResult(QStringLiteral("RAG is not enabled"));
+        return;
+    }
+    if (_ragClient->ragEndpoint().isEmpty()) {
+        emit ragTestResult(QStringLiteral("RAG endpoint is not configured"));
+        return;
+    }
+
+    auto results = _ragClient->retrieveSync(QStringLiteral("drone"), 1, 0.0);
+    if (!results.isEmpty()) {
+        emit ragTestResult(QStringLiteral("✅ Connection successful, retrieved %1 result(s)").arg(results.size()));
+    } else {
+        emit ragTestResult(QStringLiteral("❌ No results retrieved, please check endpoint and knowledge base configuration"));
+    }
+}
+
 void AgentManager::sendMessage(const QString &userMessage)   //转发用户消息到ReActLoop
 {
     if (_isProcessing || userMessage.trimmed().isEmpty()) return;
     if (_apiKey.isEmpty()) {
-        _errorMessage = QStringLiteral("请设置 API Key");
+        _errorMessage = QStringLiteral("Please set API Key");
         emit errorMessageChanged();
         return;
     }
@@ -264,11 +343,11 @@ void AgentManager::rejectCommand()
 void AgentManager::runQuickCheck(const QString &checkType)
 {
     static const QHash<QString, QString> prompts = {
-        {QStringLiteral("battery"),    QStringLiteral("检查电池状态，包括电压、电量、温度、电流。有异常明确警告。")},
-        {QStringLiteral("gps"),        QStringLiteral("检查GPS状态，卫星数、HDOP、定位类型，判断是否满足安全飞行。")},
-        {QStringLiteral("vibration"),  QStringLiteral("分析当前震动水平，震动过高给出排查建议。")},
-        {QStringLiteral("preflight"),  QStringLiteral("执行完整飞前检查：电池、GPS、传感器、遥控器、螺旋桨、安全开关。")},
-        {QStringLiteral("params"),     QStringLiteral("检查飞控参数异常：PID、校准、安全开关配置。")}
+        {QStringLiteral("battery"),    QStringLiteral("Check battery status, including voltage, charge level, temperature, and current. Warn clearly if any abnormality is detected.")},
+        {QStringLiteral("gps"),        QStringLiteral("Check GPS status: satellite count, HDOP, fix type. Assess whether conditions are safe for flight.")},
+        {QStringLiteral("vibration"),  QStringLiteral("Analyze current vibration levels. If vibration is too high, provide troubleshooting recommendations.")},
+        {QStringLiteral("preflight"),  QStringLiteral("Perform a complete pre-flight check: battery, GPS, sensors, RC link, propellers, and safety switch.")},
+        {QStringLiteral("params"),     QStringLiteral("Check flight controller parameters for anomalies: PID, calibration, and safety switch configuration.")}
     };
     sendMessage(prompts.value(checkType, checkType));
 }
@@ -277,12 +356,12 @@ void AgentManager::sendVisionQuery(const QString &prompt, const QString &imageBa
 {
     if (_isProcessing || prompt.trimmed().isEmpty()) return;
     if (_apiKey.isEmpty()) {
-        _errorMessage = QStringLiteral("请设置 API Key");
+        _errorMessage = QStringLiteral("Please set API Key");
         emit errorMessageChanged();
         return;
     }
     if (imageBase64.isEmpty()) {
-        _errorMessage = QStringLiteral("图像数据为空");
+        _errorMessage = QStringLiteral("Image data is empty");
         emit errorMessageChanged();
         return;
     }
@@ -291,13 +370,13 @@ void AgentManager::sendVisionQuery(const QString &prompt, const QString &imageBa
     emit errorMessageChanged();
     _isProcessing = true;
     emit isProcessingChanged();
-    _statusText = QStringLiteral("视觉分析中...");
+    _statusText = QStringLiteral("Analyzing vision...");
     emit statusTextChanged();
 
-    emit messageReceived(QStringLiteral("user"), QStringLiteral("[截图] ") + prompt);
-    _chatMessages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("user")}, {QStringLiteral("content"), QStringLiteral("[截图] ") + prompt}});
+    emit messageReceived(QStringLiteral("user"), QStringLiteral("[Screenshot] ") + prompt);
+    _chatMessages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("user")}, {QStringLiteral("content"), QStringLiteral("[Screenshot] ") + prompt}});
 
-    QString enrichedPrompt = prompt + QStringLiteral("\n\n当前飞行器状态:\n") + _ctx->buildVehicleContext();
+    QString enrichedPrompt = prompt + QStringLiteral("\n\nCurrent Vehicle Status:\n") + _ctx->buildVehicleContext();
 
     _inVisionQuery = true;
     connect(_llm, &LLMClient::responseReceived, this, &AgentManager::_onVisionResponse, Qt::SingleShotConnection);
@@ -309,12 +388,12 @@ void AgentManager::startAutonomousTask(const QString &task)
 {
     if (_isProcessing) return;
     if (_apiKey.isEmpty()) {
-        _errorMessage = QStringLiteral("请设置 API Key");
+        _errorMessage = QStringLiteral("Please set API Key");
         emit errorMessageChanged();
         return;
     }
     if (_totalTokens >= kDailyTokenLimit) {
-        _errorMessage = QStringLiteral("已达每日 Token 限额 (%1)，请明天再试").arg(kDailyTokenLimit);
+        _errorMessage = QStringLiteral("Daily token limit reached (%1), please try again tomorrow").arg(kDailyTokenLimit);
         emit errorMessageChanged();
         return;
     }
@@ -326,9 +405,9 @@ void AgentManager::startAutonomousTask(const QString &task)
     _errorMessage.clear();
     emit errorMessageChanged();
 
-    _statusText = QStringLiteral("自主模式启动");
+    _statusText = QStringLiteral("Autonomous mode started");
     emit statusTextChanged();
-    emit messageReceived(QStringLiteral("system"), QStringLiteral("🚀 自主任务: ") + task);
+    emit messageReceived(QStringLiteral("system"), QStringLiteral("Autonomous task: ") + task);
 
     _reactLoop->start(task, true);
 }
@@ -347,7 +426,7 @@ void AgentManager::setAutonomous(bool autonomous)
     _reactLoop->setAutonomous(autonomous);
     emit isAutonomousChanged();
 
-    _statusText = autonomous ? QStringLiteral("已切换为自主模式") : QStringLiteral("已切换为手动模式");
+    _statusText = autonomous ? QStringLiteral("Switched to autonomous mode") : QStringLiteral("Switched to manual mode");
     emit statusTextChanged();
 
     // If we just switched to autonomous while awaiting confirmation, auto-confirm
@@ -359,11 +438,11 @@ void AgentManager::setAutonomous(bool autonomous)
 void AgentManager::fetchModels()
 {
     if (_apiEndpoint.isEmpty() || _apiKey.isEmpty()) {
-        _errorMessage = QStringLiteral("请先设置 Base URL 和 API Key");
+        _errorMessage = QStringLiteral("Please set Base URL and API Key first");
         emit errorMessageChanged();
         return;
     }
-    _statusText = QStringLiteral("正在连接...");
+    _statusText = QStringLiteral("Connecting...");
     emit statusTextChanged();
     _connectionStatus = StatusConnecting;
     emit connectionStatusChanged();
@@ -378,7 +457,7 @@ void AgentManager::testConnection()
 void AgentManager::clearConversationHistory()
 {
     _reactLoop->clearHistory();
-    emit messageReceived(QStringLiteral("system"), QStringLiteral("🗑 对话历史已清除"));
+    emit messageReceived(QStringLiteral("system"), QStringLiteral("Chat history cleared"));
 }
 
 bool AgentManager::hasConversationHistory() const
@@ -386,11 +465,53 @@ bool AgentManager::hasConversationHistory() const
     return _reactLoop->hasHistory();
 }
 
+// ═══ Chat Archive ═══
+
+QString AgentManager::archiveCurrentChat()
+{
+    if (_chatMessages.isEmpty()) return {};
+
+    QString id = _archiveManager->archiveCurrent(_chatMessages);
+    if (!id.isEmpty()) {
+        emit messageReceived(QStringLiteral("system"),
+            QStringLiteral("Chat archived (%1 messages)").arg(_chatMessages.size()));
+        emit archiveListChanged();
+    }
+    return id;
+}
+
+QVariantList AgentManager::listArchives() const
+{
+    return _archiveManager->listArchives();
+}
+
+QVariantList AgentManager::loadArchiveMessages(const QString &id) const
+{
+    QJsonArray messages = _archiveManager->loadArchive(id);
+    QVariantList result;
+    for (const auto &msgVal : messages) {
+        result.append(msgVal.toVariant().toMap());
+    }
+    return result;
+}
+
+bool AgentManager::deleteArchive(const QString &id)
+{
+    bool ok = _archiveManager->deleteArchive(id);
+    if (ok) emit archiveListChanged();
+    return ok;
+}
+
+int AgentManager::archiveCount() const
+{
+    return _archiveManager->archiveCount();
+}
+
 void AgentManager::runLogAnalysis(const QString &filePath, const QString &analysisType)
 {
     if (_isProcessing) return;
     if (_apiKey.isEmpty()) {
-        _errorMessage = QStringLiteral("请先设置 API Key");
+        _errorMessage = QStringLiteral("Please set API Key first");
         emit errorMessageChanged();
         return;
     }
@@ -402,10 +523,10 @@ void AgentManager::runLogAnalysis(const QString &filePath, const QString &analys
         return;
     }
 
-    _statusText = QStringLiteral("分析日志中...");
+    _statusText = QStringLiteral("Analyzing log...");
     emit statusTextChanged();
     emit messageReceived(QStringLiteral("system"),
-        QStringLiteral("开始分析: ") + filePath + QStringLiteral(" (") + analysisType + QStringLiteral(")"));
+        QStringLiteral("Starting analysis: ") + filePath + QStringLiteral(" (") + analysisType + QStringLiteral(")"));
 
     QJsonObject results = _logAnalyzer->analyze(analysisType);
     QString report = _logAnalyzer->generateReport(results);
@@ -428,7 +549,7 @@ void AgentManager::runLogAnalysis(const QString &filePath, const QString &analys
         ts.opticalFlowSeries
     );
 
-    _statusText = QStringLiteral("就绪");
+    _statusText = QStringLiteral("Ready");
     emit statusTextChanged();
 
     emit logAnalysisReady(report);
@@ -442,7 +563,7 @@ void AgentManager::listDownloadedLogs()
 
     QDir dir(logDir);
     if (!dir.exists()) {
-        emit messageReceived(QStringLiteral("system"), QStringLiteral("日志目录不存在: ") + logDir);
+        emit messageReceived(QStringLiteral("system"), QStringLiteral("Log directory does not exist: ") + logDir);
         return;
     }
 
@@ -451,11 +572,11 @@ void AgentManager::listDownloadedLogs()
 
     if (files.isEmpty()) {
         emit messageReceived(QStringLiteral("system"),
-            QStringLiteral("日志目录为空: ") + logDir + QStringLiteral("\n请先在 Analyze → Onboard Logs 中下载机载日志"));
+            QStringLiteral("Log directory is empty: ") + logDir + QStringLiteral("\nPlease download onboard logs first via Analyze → Onboard Logs"));
         return;
     }
 
-    QString msg = QStringLiteral("📂 已下载的日志 (%1 个):\n").arg(files.size());
+    QString msg = QStringLiteral("Downloaded logs (%1):\n").arg(files.size());
     msg += QString(30, QChar(0x2500)) + QStringLiteral("\n");
 
     QJsonArray arr;
@@ -478,10 +599,10 @@ void AgentManager::listDownloadedLogs()
         msg += QStringLiteral("%1. %2 (%3, %4)\n").arg(i + 1).arg(fi.fileName()).arg(sizeStr).arg(entry[QStringLiteral("date")].toString());
     }
     if (files.size() > 15) {
-        msg += QStringLiteral("… 还有 %1 个文件\n").arg(files.size() - 15);
+        msg += QStringLiteral("... and %1 more files\n").arg(files.size() - 15);
     }
     msg += QString(30, QChar(0x2500)) + QStringLiteral("\n");
-    msg += QStringLiteral("点击 \"分析 #\" 选择序号，或点击 \"分析最新\" 自动分析最新的日志");
+    msg += QStringLiteral("Click \"Analyze #\" to select by index, or \"Analyze Latest\" to auto-analyze the most recent log");
 
     _downloadedLogsCache = arr;
     emit downloadedLogsList(arr);
@@ -491,7 +612,7 @@ void AgentManager::listDownloadedLogs()
 void AgentManager::analyzeLogByIndex(int index)
 {
     if (index < 0 || index >= _downloadedLogsCache.size()) {
-        emit messageReceived(QStringLiteral("system"), QStringLiteral("无效的日志序号: ") + QString::number(index + 1));
+        emit messageReceived(QStringLiteral("system"), QStringLiteral("Invalid log index: ") + QString::number(index + 1));
         return;
     }
     QJsonObject entry = _downloadedLogsCache[index].toObject();
@@ -502,7 +623,7 @@ void AgentManager::analyzeLogByIndex(int index)
 void AgentManager::downloadOnboardLogs()
 {
     if (!MultiVehicleManager::instance()->activeVehicle()) {
-        emit messageReceived(QStringLiteral("system"), QStringLiteral("无飞行器连接，无法下载机载日志"));
+        emit messageReceived(QStringLiteral("system"), QStringLiteral("No vehicle connected, cannot download onboard logs"));
         return;
     }
 
@@ -516,9 +637,9 @@ void AgentManager::downloadOnboardLogs()
                 &AgentManager::_onOnboardLogDownloadComplete);
     }
 
-    _statusText = QStringLiteral("请求机载日志列表...");
+    _statusText = QStringLiteral("Requesting onboard log list...");
     emit statusTextChanged();
-    emit messageReceived(QStringLiteral("system"), QStringLiteral("📡 正在请求机载日志列表..."));
+    emit messageReceived(QStringLiteral("system"), QStringLiteral("Requesting onboard log list..."));
 
     _onboardDownloadDir = SettingsManager::instance()->appSettings()->logSavePath();
     _onboardLogCtrl->refresh();
@@ -553,29 +674,29 @@ QJsonArray AgentManager::listOnboardLogs()
 void AgentManager::downloadOnboardLogByIndex(int index)
 {
     if (!_onboardLogCtrl) {
-        emit messageReceived(QStringLiteral("system"), QStringLiteral("请先请求机载日志列表"));
+        emit messageReceived(QStringLiteral("system"), QStringLiteral("Please request onboard log list first"));
         return;
     }
     auto *model = qobject_cast<QmlObjectListModel *>(
         _onboardLogCtrl->property("model").value<QObject *>());
     if (!model || index < 0 || index >= model->count()) {
-        emit messageReceived(QStringLiteral("system"), QStringLiteral("日志索引无效"));
+        emit messageReceived(QStringLiteral("system"), QStringLiteral("Invalid log index"));
         return;
     }
     auto *entry = model->value<QGCOnboardLogEntry *>(index);
     if (!entry) {
-        emit messageReceived(QStringLiteral("system"), QStringLiteral("日志条目无效"));
+        emit messageReceived(QStringLiteral("system"), QStringLiteral("Invalid log entry"));
         return;
     }
     entry->setSelected(true);
-    QString logInfo = QStringLiteral("📥 正在下载 #%1 (%2)")
+    QString logInfo = QStringLiteral("Downloading #%1 (%2)")
         .arg(entry->id())
         .arg(entry->size() < 1024 * 1024
             ? QString::number(entry->size() / 1024.0, 'f', 1) + QStringLiteral("KB")
             : QString::number(entry->size() / (1024.0 * 1024.0), 'f', 1) + QStringLiteral("MB"));
     emit messageReceived(QStringLiteral("system"), logInfo);
     emit onboardDownloadProgress(logInfo);
-    _statusText = QStringLiteral("下载机载日志中...");
+    _statusText = QStringLiteral("Downloading onboard log...");
     emit statusTextChanged();
     _onboardLogCtrl->download(_onboardDownloadDir);
 }
@@ -621,7 +742,7 @@ void AgentManager::_onReActStopped()
 
     _isProcessing = false;
     emit isProcessingChanged();
-    _statusText = _isAutonomous ? QStringLiteral("自主模式待命中") : QStringLiteral("就绪");
+    _statusText = _isAutonomous ? QStringLiteral("Autonomous mode standing by") : QStringLiteral("Ready");
     emit statusTextChanged();
 }
 
@@ -675,7 +796,7 @@ void AgentManager::_onReActToolConfirmationRequired(const QString &toolName, con
     cmdMap[QStringLiteral("description")] = cmdDesc;
     cmdMap[QStringLiteral("parameters")] = parameters.toVariantMap();
 
-    _statusText = QStringLiteral("等待确认: %1").arg(cmdDesc);
+    _statusText = QStringLiteral("Awaiting confirmation: %1").arg(cmdDesc);
     emit statusTextChanged();
     emit commandPending(cmdDesc, cmdMap);
 }
@@ -687,7 +808,7 @@ void AgentManager::_onReActToolResult(const QString &toolName, const QJsonObject
     } else {
         QString result = observation.contains(QStringLiteral("result"))
             ? observation[QStringLiteral("result")].toString()
-            : QStringLiteral("✓ %1 完成").arg(toolName);
+            : QStringLiteral("%1 complete").arg(toolName);
         emit commandExecuted(result);
     }
 }
@@ -698,7 +819,7 @@ void AgentManager::_onReActThought(const QString &thought)
     if (_isAutonomous) {
         emit autonomousStep(thought, QString());
     } else {
-        _statusText = QStringLiteral("思考: %1").arg(thought.left(80));
+        _statusText = QStringLiteral("Thinking: %1").arg(thought.left(80));
         emit statusTextChanged();
     }
 }
@@ -710,7 +831,7 @@ void AgentManager::_onReActToolInvoked(const QString &toolName, const QJsonObjec
     if (_isAutonomous) {
         emit autonomousStep(_lastThought.isEmpty() ? actionDesc : _lastThought, actionDesc);
     } else {
-        _statusText = QStringLiteral("执行: %1").arg(actionDesc);
+        _statusText = QStringLiteral("Executing: %1").arg(actionDesc);
         emit statusTextChanged();
     }
 }
@@ -718,7 +839,7 @@ void AgentManager::_onReActToolInvoked(const QString &toolName, const QJsonObjec
 void AgentManager::_onReActFinalAnswer(const QString &answer)
 {
     if (_isAutonomous) {
-        emit autonomousStep(answer, QStringLiteral("[任务完成]"));
+        emit autonomousStep(answer, QStringLiteral("[Task complete]"));
     }
     // In manual mode, the answer is already displayed via messageReceived from _onReActMessageProduced
 }
@@ -732,7 +853,7 @@ void AgentManager::_onVisionResponse(const QString &content)
     emit isProcessingChanged();
 
     _trackTokens(content);
-    _statusText = QStringLiteral("就绪");
+    _statusText = QStringLiteral("Ready");
     emit statusTextChanged();
 
     _chatMessages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("assistant")}, {QStringLiteral("content"), content}});
@@ -747,9 +868,9 @@ void AgentManager::_onVisionError(const QString &error)
 
     _errorMessage = error;
     emit errorMessageChanged();
-    _statusText = QStringLiteral("错误");
+    _statusText = QStringLiteral("Error");
     emit statusTextChanged();
-    emit messageReceived(QStringLiteral("system"), QStringLiteral("✗ 视觉分析失败: ") + error);
+    emit messageReceived(QStringLiteral("system"), QStringLiteral("Vision analysis failed: ") + error);
 }
 
 // ---- Onboard log slots ----
@@ -761,15 +882,15 @@ void AgentManager::_onOnboardLogListComplete()
     auto *model = qobject_cast<QmlObjectListModel *>(
         _onboardLogCtrl->property("model").value<QObject *>());
     if (!model || model->count() == 0) {
-        emit messageReceived(QStringLiteral("system"), QStringLiteral("未找到机载日志"));
-        _statusText = QStringLiteral("就绪");
+        emit messageReceived(QStringLiteral("system"), QStringLiteral("No onboard logs found"));
+        _statusText = QStringLiteral("Ready");
         emit statusTextChanged();
         return;
     }
 
     // Build list message for UI
     QStringList lines;
-    lines.append(QStringLiteral("📡 机载日志列表 (%1 个):").arg(model->count()));
+    lines.append(QStringLiteral("Onboard log list (%1):").arg(model->count()));
     for (int i = 0; i < model->count(); i++) {
         auto *e = model->value<QGCOnboardLogEntry *>(i);
         if (e) {
@@ -781,11 +902,11 @@ void AgentManager::_onOnboardLogListComplete()
         }
     }
     lines.append(QStringLiteral("---"));
-    lines.append(QStringLiteral("请在弹出的列表中选择要下载的日志"));
+    lines.append(QStringLiteral("Please select a log to download from the list"));
 
     emit messageReceived(QStringLiteral("system"), lines.join("\n"));
-    emit onboardDownloadProgress(QStringLiteral("列表已加载"));
-    _statusText = QStringLiteral("就绪");
+    emit onboardDownloadProgress(QStringLiteral("List loaded"));
+    _statusText = QStringLiteral("Ready");
     emit statusTextChanged();
 }
 
@@ -798,8 +919,8 @@ void AgentManager::_onOnboardLogDownloadComplete()
     QFileInfoList files = dir.entryInfoList(filters, QDir::Files, QDir::Time);
 
     if (files.isEmpty()) {
-        emit messageReceived(QStringLiteral("system"), QStringLiteral("下载完成但未找到日志文件"));
-        _statusText = QStringLiteral("就绪");
+        emit messageReceived(QStringLiteral("system"), QStringLiteral("Download completed but log file not found"));
+        _statusText = QStringLiteral("Ready");
         emit statusTextChanged();
         return;
     }
@@ -807,9 +928,9 @@ void AgentManager::_onOnboardLogDownloadComplete()
     QString path = files.first().absoluteFilePath();
     QString name = files.first().fileName();
     emit messageReceived(QStringLiteral("system"),
-        QStringLiteral("✅ 下载完成: ") + name + QStringLiteral("\n开始自动分析..."));
+        QStringLiteral("Download complete: ") + name + QStringLiteral("\nStarting auto analysis..."));
     emit onboardDownloadComplete(path);
-    _statusText = QStringLiteral("就绪");
+    _statusText = QStringLiteral("Ready");
     emit statusTextChanged();
 
     runLogAnalysis(path, QStringLiteral("all"));
@@ -821,82 +942,82 @@ QString AgentManager::_buildCommandDescription(const QString &toolName, const QJ
         QString action = p[QStringLiteral("action")].toString();
         if (action == QStringLiteral("takeoff")) {
             double alt = p[QStringLiteral("altitude")].toDouble(10);
-            return QStringLiteral("起飞到 %1m").arg(alt);
+            return QStringLiteral("Take off to %1m").arg(alt);
         }
-        if (action == QStringLiteral("land"))  return QStringLiteral("降落");
-        if (action == QStringLiteral("rtl"))   return QStringLiteral("返航");
-        if (action == QStringLiteral("pause")) return QStringLiteral("悬停");
+        if (action == QStringLiteral("land"))  return QStringLiteral("Land");
+        if (action == QStringLiteral("rtl"))   return QStringLiteral("Return to home (RTL)");
+        if (action == QStringLiteral("pause")) return QStringLiteral("Hover");
         if (action == QStringLiteral("goto")) {
             double lat = p[QStringLiteral("latitude")].toDouble();
             double lon = p[QStringLiteral("longitude")].toDouble();
             double alt = p[QStringLiteral("altitude")].toDouble(50);
-            return QStringLiteral("飞向 (%1, %2) 高度 %3m").arg(lat, 0, 'f', 6).arg(lon, 0, 'f', 6).arg(alt);
+            return QStringLiteral("Goto (%1, %2) alt %3m").arg(lat, 0, 'f', 6).arg(lon, 0, 'f', 6).arg(alt);
         }
         if (action == QStringLiteral("orbit")) {
             double lat = p[QStringLiteral("latitude")].toDouble();
             double lon = p[QStringLiteral("longitude")].toDouble();
             double r = p[QStringLiteral("radius")].toDouble(30);
-            return QStringLiteral("环绕 (%1, %2) 半径 %3m").arg(lat, 0, 'f', 6).arg(lon, 0, 'f', 6).arg(r);
+            return QStringLiteral("Orbit (%1, %2) radius %3m").arg(lat, 0, 'f', 6).arg(lon, 0, 'f', 6).arg(r);
         }
-        return QStringLiteral("飞控: %1").arg(action);
+        return QStringLiteral("Flight control: %1").arg(action);
     }
     if (toolName == QStringLiteral("relative_move")) {
         QString dir = p[QStringLiteral("direction")].toString();
         double m = p[QStringLiteral("meters")].toDouble(5);
-        if (dir == QStringLiteral("fwd"))  return QStringLiteral("前进 %1m").arg(m);
-        if (dir == QStringLiteral("back")) return QStringLiteral("后退 %1m").arg(m);
-        if (dir == QStringLiteral("left")) return QStringLiteral("左移 %1m").arg(m);
-        if (dir == QStringLiteral("right")) return QStringLiteral("右移 %1m").arg(m);
-        if (dir == QStringLiteral("turn")) return QStringLiteral("转向 %1°").arg(m);
-        return QStringLiteral("相对移动: %1 %2m").arg(dir).arg(m);
+        if (dir == QStringLiteral("fwd"))  return QStringLiteral("Forward %1m").arg(m);
+        if (dir == QStringLiteral("back")) return QStringLiteral("Backward %1m").arg(m);
+        if (dir == QStringLiteral("left")) return QStringLiteral("Left %1m").arg(m);
+        if (dir == QStringLiteral("right")) return QStringLiteral("Right %1m").arg(m);
+        if (dir == QStringLiteral("turn")) return QStringLiteral("Turn %1deg").arg(m);
+        return QStringLiteral("Relative move: %1 %2m").arg(dir).arg(m);
     }
     if (toolName == QStringLiteral("altitude_speed")) {
         QString param = p[QStringLiteral("parameter")].toString();
         double val = p[QStringLiteral("value")].toDouble();
-        if (param == QStringLiteral("altitude")) return QStringLiteral("高度变化 %1m").arg(val);
-        if (param == QStringLiteral("speed"))    return QStringLiteral("地速设为 %1m/s").arg(val);
+        if (param == QStringLiteral("altitude")) return QStringLiteral("Altitude change %1m").arg(val);
+        if (param == QStringLiteral("speed"))    return QStringLiteral("Ground speed set to %1m/s").arg(val);
         return QStringLiteral("alt/speed: %1 = %2").arg(param).arg(val);
     }
     if (toolName == QStringLiteral("flight_mode")) {
         QString mode = p[QStringLiteral("mode")].toString();
-        return QStringLiteral("切换模式: %1").arg(mode);
+        return QStringLiteral("Switch mode: %1").arg(mode);
     }
     if (toolName == QStringLiteral("get_parameter")) {
-        return QStringLiteral("查询参数: %1").arg(p[QStringLiteral("name")].toString());
+        return QStringLiteral("Query parameter: %1").arg(p[QStringLiteral("name")].toString());
     }
     if (toolName == QStringLiteral("set_parameter")) {
-        return QStringLiteral("设置 %1 = %2").arg(p[QStringLiteral("name")].toString()).arg(p[QStringLiteral("value")].toDouble());
+        return QStringLiteral("Set %1 = %2").arg(p[QStringLiteral("name")].toString()).arg(p[QStringLiteral("value")].toDouble());
     }
     if (toolName == QStringLiteral("list_parameters")) {
-        return QStringLiteral("列举参数: %1").arg(p[QStringLiteral("keyword")].toString());
+        return QStringLiteral("List parameters: %1").arg(p[QStringLiteral("keyword")].toString());
     }
     if (toolName == QStringLiteral("mavlink_command")) {
         QString cmd = p[QStringLiteral("command_name")].toString();
         return QStringLiteral("MAVLink: %1").arg(cmd);
     }
     if (toolName == QStringLiteral("log_analysis")) {
-        return QStringLiteral("日志分析: %1").arg(p[QStringLiteral("analysis_type")].toString(QStringLiteral("all")));
+        return QStringLiteral("Log analysis: %1").arg(p[QStringLiteral("analysis_type")].toString(QStringLiteral("all")));
     }
     if (toolName == QStringLiteral("mission")) {
         QString action = p[QStringLiteral("action")].toString();
         if (action == QStringLiteral("add_takeoff")) {
             double alt = p[QStringLiteral("altitude")].toDouble(10);
-            return QStringLiteral("设置起飞高度 %1m").arg(alt);
+            return QStringLiteral("Set takeoff altitude %1m").arg(alt);
         }
         if (action == QStringLiteral("add_waypoint")) {
             double lat = p[QStringLiteral("latitude")].toDouble();
             double lon = p[QStringLiteral("longitude")].toDouble();
             double alt = p[QStringLiteral("altitude")].toDouble(50);
-            return QStringLiteral("添加航点 (%1, %2, %3m)").arg(lat, 0, 'f', 6).arg(lon, 0, 'f', 6).arg(alt);
+            return QStringLiteral("Add waypoint (%1, %2, %3m)").arg(lat, 0, 'f', 6).arg(lon, 0, 'f', 6).arg(alt);
         }
         if (action == QStringLiteral("remove_waypoint")) {
-            return QStringLiteral("删除航点 #%1").arg(p[QStringLiteral("index")].toInt());
+            return QStringLiteral("Remove waypoint #%1").arg(p[QStringLiteral("index")].toInt());
         }
-        if (action == QStringLiteral("clear"))  return QStringLiteral("清空航点");
-        if (action == QStringLiteral("list"))   return QStringLiteral("列出航点");
-        if (action == QStringLiteral("upload"))  return QStringLiteral("上传任务");
-        if (action == QStringLiteral("download")) return QStringLiteral("下载任务");
-        return QStringLiteral("任务: %1").arg(action);
+        if (action == QStringLiteral("clear"))  return QStringLiteral("Clear waypoints");
+        if (action == QStringLiteral("list"))   return QStringLiteral("List waypoints");
+        if (action == QStringLiteral("upload"))  return QStringLiteral("Upload mission");
+        if (action == QStringLiteral("download")) return QStringLiteral("Download mission");
+        return QStringLiteral("Mission: %1").arg(action);
     }
     // Fallback: tool name + first param values
     QString desc = toolName;

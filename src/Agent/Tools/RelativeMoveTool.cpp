@@ -98,7 +98,7 @@ QJsonObject RelativeMoveTool::execute(const QJsonObject &parameters)
     try {
         v->guidedModeGotoLocation(target);
         if (dir == QStringLiteral("turn")) {
-            result[QStringLiteral("result")] = QStringLiteral("✓ 转向 %1°").arg(degrees);
+            result[QStringLiteral("result")] = QStringLiteral("✓ Turn %1°").arg(degrees);
         } else {
             result[QStringLiteral("result")] = QStringLiteral("✓ %1 %2m").arg(dir).arg(meters);
         }

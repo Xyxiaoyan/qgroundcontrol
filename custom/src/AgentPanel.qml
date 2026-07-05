@@ -44,7 +44,7 @@ Rectangle {
     readonly property color _textDim:       Qt.rgba(qgcPal.text.r, qgcPal.text.g, qgcPal.text.b, 0.5)
 
     property bool isExpanded: false
-    property int currentTab: 0  // 0=chat, 1=diagnostics, 2=charts, 3=settings
+    property int currentTab: 0  // 0=chat, 1=diagnostics, 2=charts, 3=settings, 4=knowledge
 
     // ═══ AgentManager (injected by FlyViewCustomLayer) ═══
     property var _agentMgr: null
@@ -387,7 +387,9 @@ Rectangle {
                     { label: "◈ 对话", icon: "对话" },
                     { label: "◉ 诊断", icon: "诊断" },
                     { label: "📊 图表", icon: "图表" },
-                    { label: "⚙ 设置", icon: "设置" }
+                    { label: "⚙ 设置", icon: "设置" },
+                    { label: "📚 知识库", icon: "知识库" },
+                    { label: "🗄 归档", icon: "归档" }
                 ]
                 Rectangle {
                     Layout.fillWidth: true; height: Math.round(_sp * 2.4); radius: Math.round(_sp * 0.3)
@@ -470,14 +472,14 @@ Rectangle {
                             { label: "📋 历史", type: "history" }
                         ]
                         delegate: Rectangle {
-                            width: Math.max(Math.round(_sp * 6.5), (parent ? parent.width - parent.spacing * 3 : 360) / 4)
-                            height: Math.round(_sp * 2.0)
-                            radius: Math.round(_sp * 0.25)
-                            color: qbEnabled ? (qbHover.hovered ? Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.1) : _bgDark) : _bgDark
-                            border { color: qbEnabled ? (qbHover.hovered ? _accentCyan : _borderDim) : _borderDim; width: 1 }
+                            width: chipLbl.implicitWidth + Math.round(_sp * 1.4)
+                            height: Math.round(_sp * 2.2)
+                            radius: height / 2
+                            color: qbEnabled ? (qbHover.hovered ? Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.12) : Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.05)) : _bgDark
+                            border { color: qbEnabled ? (qbHover.hovered ? _accentCyan : Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.25)) : _borderDim; width: 1 }
                             property bool qbEnabled: modelData.type === "vision" ? _agentOK : (_agentOK && !_agentBusy)
                             Text {
-                                anchors.centerIn: parent; text: modelData.label
+                                id: chipLbl; anchors.centerIn: parent; text: modelData.label
                                 color: parent.qbEnabled ? _textPrimary : _textDim
                                 font.pixelSize: Math.round(_sp * 0.9)
                             }
@@ -513,11 +515,10 @@ Rectangle {
                     }
                 }
 
-                // ═══ Chat List (JARVIS-style) ═══
+                // ═══ Chat List (ChatGPT-style flat) ═══
                 Rectangle {
                     Layout.fillWidth: true; Layout.fillHeight: true
-                    color: _bgDark; radius: Math.round(_sp * 0.5)
-                    border.color: _borderDim; border.width: 1; clip: true
+                    color: "transparent"; clip: true
 
                     ListView {
                         id: chatView
@@ -542,131 +543,169 @@ Rectangle {
                         }
 
                         delegate: Item {
-                            width: chatView.width; height: msgColumn.height + Math.round(_sp * 0.4)
+                            id: msgDelegate
+                            width: chatView.width
+                            height: msgCol.height + Math.round(_sp * 0.6)
+
+                            readonly property real _maxContentWidth: chatView.width - Math.round(_sp * 3.6)
+                            readonly property bool _isUser: model.role === "user"
+                            readonly property bool _isThinking: model.role === "thinking"
+                            readonly property bool _isSystem: model.role === "system"
+                            readonly property color _roleColor: _isUser ? _accentOrange
+                                                               : _isThinking ? _accentBlue
+                                                               : _isSystem ? _accentGreen
+                                                               : _accentCyan
+                            readonly property string _avatarText: _isUser ? "我"
+                                                                : _isThinking ? "💭"
+                                                                : _isSystem ? "⚙"
+                                                                : "AI"
 
                             ColumnLayout {
-                                id: msgColumn
-                                width: parent.width; spacing: Math.round(_sp * 0.15)
+                                id: msgCol
+                                width: parent.width
+                                anchors.top: parent.top
+                                spacing: Math.round(_sp * 0.2)
 
-                                // Role indicator row (JARVIS-style)
                                 RowLayout {
-                                    spacing: Math.round(_sp * 0.3)
-                                    // Accent bar
+                                    Layout.fillWidth: true
+                                    spacing: Math.round(_sp * 0.4)
+                                    layoutDirection: msgDelegate._isUser ? Qt.RightToLeft : Qt.LeftToRight
+
+                                    // Avatar
                                     Rectangle {
-                                        width: Math.round(_sp * 0.25); height: Math.round(_sp * 0.9)
-                                        radius: Math.round(_sp * 0.1)
-                                        color: model.role === "user" ? _accentOrange
-                                             : model.role === "thinking" ? _accentBlue
-                                             : model.role === "system" ? _accentGreen
-                                             : _accentCyan
-                                    }
-                                    Text {
-                                        text: model.role === "user" ? "YOU"
-                                            : model.role === "thinking" ? "思考"
-                                            : model.role === "streaming" ? "AI"
-                                            : model.role === "system" ? "系统"
-                                            : "AI"
-                                        color: model.role === "user" ? _accentOrange
-                                             : model.role === "thinking" ? _accentBlue
-                                             : model.role === "system" ? _accentGreen
-                                             : _accentCyan
-                                        font { pixelSize: Math.round(_sp * 0.7); bold: true }
-                                    }
-                                    Item { Layout.fillWidth: true }
-                                    Text {
-                                        text: model.ts || ""
-                                        color: _textDim
-                                        font.pixelSize: Math.round(_sp * 0.6)
-                                        visible: text.length > 0
-                                    }
-                                    // Copy button
-                                    Rectangle {
-                                        width: Math.round(_sp * 1.3); height: width
-                                        radius: Math.round(_sp * 0.15)
-                                        color: copyHover.hovered ? Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.1) : "transparent"
-                                        visible: model.role !== "thinking"
+                                        Layout.preferredWidth: Math.round(_sp * 2.2)
+                                        Layout.preferredHeight: Math.round(_sp * 2.2)
+                                        Layout.alignment: Qt.AlignTop
+                                        radius: width / 2
+                                        color: Qt.rgba(msgDelegate._roleColor.r, msgDelegate._roleColor.g, msgDelegate._roleColor.b, 0.15)
+                                        border.color: msgDelegate._roleColor; border.width: 1
                                         Text {
                                             anchors.centerIn: parent
-                                            text: "📋"; font.pixelSize: Math.round(_sp * 0.7)
-                                        }
-                                        MouseArea {
-                                            id: copyHover
-                                            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                            onClicked: _copyToClipboard(model.content || "")
+                                            text: msgDelegate._avatarText
+                                            color: msgDelegate._roleColor
+                                            font.pixelSize: Math.round(_sp * 0.75)
+                                            font.bold: true
                                         }
                                     }
-                                }
 
-                                // Message bubble with accent bar (JARVIS-style)
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: msgText.contentHeight + Math.round(_sp * 1.0)
-                                    color: model.role === "user" ? Qt.rgba(_accentOrange.r, _accentOrange.g, _accentOrange.b, 0.06)
-                                         : model.role === "thinking" ? Qt.rgba(_accentBlue.r, _accentBlue.g, _accentBlue.b, 0.04)
-                                         : Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.04)
-                                    radius: Math.round(_sp * 0.3)
-                                    border.color: model.role === "user" ? Qt.rgba(_accentOrange.r, _accentOrange.g, _accentOrange.b, 0.2)
-                                                 : model.role === "thinking" ? Qt.rgba(_accentBlue.r, _accentBlue.g, _accentBlue.b, 0.15)
-                                                 : Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.15)
-                                    border.width: 1
+                                    // Content column
+                                    ColumnLayout {
+                                        Layout.maximumWidth: msgDelegate._maxContentWidth
+                                        Layout.fillWidth: !msgDelegate._isUser
+                                        spacing: Math.round(_sp * 0.15)
 
-                                    // Left accent stripe (JARVIS-style)
-                                    Rectangle {
-                                        width: Math.round(_sp * 0.15)
-                                        height: parent.height - Math.round(_sp * 0.5)
-                                        y: Math.round(_sp * 0.25); x: Math.round(_sp * 0.25)
-                                        radius: Math.round(_sp * 0.05)
-                                        color: model.role === "user" ? Qt.rgba(_accentOrange.r, _accentOrange.g, _accentOrange.b, 0.4)
-                                             : model.role === "thinking" ? Qt.rgba(_accentBlue.r, _accentBlue.g, _accentBlue.b, 0.3)
-                                             : Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.3)
-                                    }
+                                        // Name + timestamp (hidden for user)
+                                        RowLayout {
+                                            spacing: Math.round(_sp * 0.3)
+                                            visible: !msgDelegate._isUser
+                                            Text {
+                                                text: msgDelegate._isThinking ? "思考过程"
+                                                    : msgDelegate._isSystem ? "系统消息"
+                                                    : "AI 助手"
+                                                color: msgDelegate._roleColor
+                                                font { pixelSize: Math.round(_sp * 0.75); bold: true }
+                                            }
+                                            Text {
+                                                text: model.ts || ""
+                                                color: _textDim
+                                                font.pixelSize: Math.round(_sp * 0.65)
+                                                visible: text.length > 0
+                                            }
+                                        }
 
-                                    Text {
-                                        id: msgText
-                                        anchors { fill: parent; margins: Math.round(_sp * 0.5); leftMargin: Math.round(_sp * 0.8) }
-                                        text: model.role === "thinking"
-                                            ? (typeof model._isCurrentThinking !== "undefined" && model._isCurrentThinking ? "▼ 思考过程\n" + (model.content || "") : "▶ 思考过程")
-                                            : model.role === "streaming"
-                                            ? (model.content || "") + "▌"
-                                            : (model.content || "")
-                                        color: model.role === "user" ? qgcPal.buttonText
-                                             : model.role === "thinking" ? _accentBlue
-                                             : _textPrimary
-                                        font.pixelSize: model.role === "thinking" ? Math.round(_sp * 0.9) : Math.round(_sp * 1.05)
-                                        wrapMode: Text.Wrap
-                                        textFormat: model.role === "thinking"
-                                            ? Text.PlainText
-                                            : model.role === "streaming"
-                                            ? Text.PlainText  // Avoid expensive Markdown re-parse on every token
-                                            : Text.MarkdownText
-                                        lineHeight: 1.3
-                                    }
+                                        // Bubble (user: tinted, right-aligned) / flat text (AI: transparent)
+                                        Rectangle {
+                                            id: bubble
+                                            Layout.alignment: msgDelegate._isUser ? Qt.AlignRight : Qt.AlignLeft
+                                            Layout.fillWidth: !msgDelegate._isUser
+                                            Layout.preferredWidth: msgDelegate._isUser
+                                                ? Math.min(msgText.implicitWidth + Math.round(_sp * 1.0), msgDelegate._maxContentWidth)
+                                                : -1
+                                            Layout.preferredHeight: msgText.contentHeight + Math.round(_sp * 0.9)
+                                            color: msgDelegate._isUser
+                                                ? Qt.rgba(msgDelegate._roleColor.r, msgDelegate._roleColor.g, msgDelegate._roleColor.b, 0.12)
+                                                : "transparent"
+                                            radius: Math.round(_sp * 0.5)
 
-                                    MouseArea {
-                                        anchors.fill: parent; visible: model.role === "thinking"
-                                        onClicked: {
-                                            var cur = typeof model._isCurrentThinking !== "undefined" ? model._isCurrentThinking : false
-                                            chatModel.setProperty(index, "_isCurrentThinking", !cur)
+                                            Text {
+                                                id: msgText
+                                                anchors { fill: parent; margins: Math.round(_sp * 0.5) }
+                                                text: msgDelegate._isThinking
+                                                    ? (typeof model._isCurrentThinking !== "undefined" && model._isCurrentThinking
+                                                       ? "▾ 思考过程\n" + (model.content || "")
+                                                       : "▸ 思考过程（点击展开）")
+                                                    : model.role === "streaming"
+                                                    ? (model.content || "") + "▌"
+                                                    : (model.content || "")
+                                                color: msgDelegate._isUser ? qgcPal.buttonText
+                                                     : msgDelegate._isThinking ? msgDelegate._roleColor
+                                                     : _textPrimary
+                                                font.pixelSize: msgDelegate._isThinking ? Math.round(_sp * 0.9) : Math.round(_sp * 1.05)
+                                                wrapMode: Text.Wrap
+                                                textFormat: msgDelegate._isThinking
+                                                    ? Text.PlainText
+                                                    : model.role === "streaming"
+                                                    ? Text.PlainText  // Avoid expensive Markdown re-parse on every token
+                                                    : Text.MarkdownText
+                                                lineHeight: 1.35
+                                            }
+
+                                            MouseArea {
+                                                anchors.fill: parent; visible: msgDelegate._isThinking
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    var cur = typeof model._isCurrentThinking !== "undefined" ? model._isCurrentThinking : false
+                                                    chatModel.setProperty(index, "_isCurrentThinking", !cur)
+                                                }
+                                            }
+                                        }
+
+                                        // Action row (copy) — below messages with content
+                                        RowLayout {
+                                            spacing: Math.round(_sp * 0.2)
+                                            visible: !msgDelegate._isThinking && (model.content || "").length > 0
+                                            layoutDirection: msgDelegate._isUser ? Qt.RightToLeft : Qt.LeftToRight
+                                            Rectangle {
+                                                width: actCopyLbl.implicitWidth + Math.round(_sp * 0.9)
+                                                height: Math.round(_sp * 1.6)
+                                                radius: height / 2
+                                                color: actCopyHover.hovered ? Qt.rgba(msgDelegate._roleColor.r, msgDelegate._roleColor.g, msgDelegate._roleColor.b, 0.12) : "transparent"
+                                                Text {
+                                                    id: actCopyLbl; anchors.centerIn: parent
+                                                    text: "📋 复制"; color: _textDim
+                                                    font.pixelSize: Math.round(_sp * 0.7)
+                                                }
+                                                MouseArea {
+                                                    id: actCopyHover
+                                                    anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                                    onClicked: _copyToClipboard(model.content || "")
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
 
-                        // Empty state (borrowed from JARVIS)
+                        // Empty state (ChatGPT-style greeting)
                         Column {
-                            anchors.centerIn: parent; visible: chatView.count === 0; spacing: Math.round(_sp * 0.8)
+                            anchors.centerIn: parent; visible: chatView.count === 0; spacing: Math.round(_sp * 0.6)
                             Text {
-                                text: "✈ AI 飞行助手"
-                                color: _accentCyan; font { pixelSize: Math.round(_sp * 1.6); bold: true }
+                                text: "✈"
+                                color: _accentCyan; font.pixelSize: Math.round(_sp * 2.4)
                                 horizontalAlignment: Text.AlignHCenter
                                 anchors.horizontalCenter: parent.horizontalCenter
                             }
                             Text {
-                                text: "输入问题或使用上方快捷按钮\n支持飞行诊断、日志分析、参数调整"
-                                color: _textDim; font { pixelSize: _sp; italic: true }
+                                text: "有什么可以帮你？"
+                                color: _textPrimary; font { pixelSize: Math.round(_sp * 1.4); bold: true }
                                 horizontalAlignment: Text.AlignHCenter
-                                lineHeight: 1.4
+                                anchors.horizontalCenter: parent.horizontalCenter
+                            }
+                            Text {
+                                text: "飞行诊断 · 日志分析 · 参数调整 · 任务规划"
+                                color: _textDim; font.pixelSize: Math.round(_sp * 0.95)
+                                horizontalAlignment: Text.AlignHCenter
                                 anchors.horizontalCenter: parent.horizontalCenter
                             }
                         }
@@ -735,78 +774,96 @@ Rectangle {
 
                     RowLayout {
                         anchors { fill: parent; leftMargin: Math.round(_sp * 0.8); rightMargin: Math.round(_sp * 0.8) }
+                        spacing: Math.round(_sp * 0.4)
+
                         Text {
-                            text: _agentAuto ? "◉ 自主模式" : "○ 手动模式"
+                            text: _agentAuto ? "◉ Autonomous" : "○ Manual"
                             color: _agentAuto ? _accentOrange : _textDim
                             font.pixelSize: Math.round(_sp * 1.0)
                             font.weight: Font.Medium
                             Layout.fillWidth: true
                             verticalAlignment: Text.AlignVCenter
-                        }
-                        Text {
-                            text: _agentOK && _agentMgr ? (_agentMgr.totalTokens / 1000).toFixed(1) + "K tok" : ""
-                            color: _textDim; font.pixelSize: Math.round(_sp * 0.85)
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-                    MouseArea {
-                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                        enabled: _agentOK && !_agentBusy
-                        onClicked: {
-                            var ag = _agentMgr
-                            if (!ag) return
-                            if (!ag.isAutonomous) {
-                                var txt = inputField.text.trim()
-                                ag.setAutonomous(true)
-                                if (txt.length > 0) { ag.sendMessage(txt); inputField.text = "" }
-                            } else {
-                                ag.setAutonomous(false)
+
+                            MouseArea {
+                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                enabled: _agentOK && !_agentBusy
+                                onClicked: {
+                                    var ag = _agentMgr
+                                    if (!ag) return
+                                    ag.setAutonomous(!ag.isAutonomous)
+                                }
                             }
+                        }
+
+                        // Token badge — display only, does NOT trigger mode toggle
+                        Rectangle {
+                            Layout.preferredHeight: Math.round(_sp * 1.8)
+                            Layout.preferredWidth: tokText.implicitWidth + Math.round(_sp * 0.8)
+                            radius: Math.round(_sp * 0.2)
+                            color: Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.08)
+                            border { color: _borderDim; width: 1 }
+                            Text {
+                                id: tokText
+                                anchors.centerIn: parent
+                                text: _agentOK && _agentMgr ? (_agentMgr.totalTokens / 1000).toFixed(1) + "K tokens" : ""
+                                color: _accentCyan
+                                font.pixelSize: Math.round(_sp * 0.8)
+                                font.weight: Font.Medium
+                            }
+                            // Block clicks from reaching the mode toggle behind
+                            MouseArea { anchors.fill: parent; onClicked: {} }
                         }
                     }
                 }
 
-                // ═══ Input Row ═══
-                RowLayout {
+                // ═══ Input Row (ChatGPT-style capsule) ═══
+                Rectangle {
                     Layout.fillWidth: true
-                    spacing: Math.round(_sp * 0.35)
+                    Layout.preferredHeight: Math.round(_sp * 3.4)
+                    radius: Math.round(_sp * 1.7)
+                    readonly property bool _isDark: qgcPal.globalTheme === 1
+                    color: _isDark ? "#2a2a2a" : "#ffffff"
+                    border.color: _agentAuto
+                                 ? (inputField.activeFocus ? _accentOrange : Qt.rgba(_accentOrange.r, _accentOrange.g, _accentOrange.b, 0.4))
+                                 : (inputField.activeFocus ? _accentCyan : _borderDim)
+                    border.width: 1
 
                     TextField {
                         id: inputField
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: Math.round(_sp * 3.0)
+                        anchors {
+                            left: parent.left; right: sendBtn.left
+                            top: parent.top; bottom: parent.bottom
+                            leftMargin: Math.round(_sp * 0.8); rightMargin: Math.round(_sp * 0.3)
+                        }
                         font.pixelSize: Math.round(_sp * 1.05)
-                        placeholderText: _agentOK && _agentAuto ? "自主模式中..." : "输入问题或任务..."
+                        placeholderText: !_agentOK ? "Agent not configured..."
+                                       : _agentAuto ? "Autonomous mode — commands execute without confirmation"
+                                       : "Type a message..."
                         enabled: _agentOK && !_agentBusy
                         verticalAlignment: TextInput.AlignVCenter
                         onAccepted: _doSend()
-                        // Use explicit colors — palette colors flip to white-on-white when
-                        // the control is disabled, making text invisible.
-                        readonly property bool _isDark: qgcPal.globalTheme === 1
-                        background: Rectangle {
-                            radius: Math.round(_sp * 0.35)
-                            color: inputField._isDark ? "#2a2a2a" : "#ffffff"
-                            border { color: inputField.activeFocus ? _accentCyan : _borderDim; width: 1 }
-                        }
-                        color: inputField._isDark ? "#eeeeee" : "#333333"
-                        placeholderTextColor: inputField._isDark ? "#777777" : "#aaaaaa"
+                        background: Rectangle { color: "transparent" }
+                        color: parent._isDark ? "#eeeeee" : "#333333"
+                        placeholderTextColor: _agentAuto
+                                              ? (parent._isDark ? "#a87a5a" : "#c4885a")
+                                              : (parent._isDark ? "#777777" : "#aaaaaa")
                     }
 
-                    // Send / Stop button
+                    // Embedded circular send / stop button
                     Rectangle {
-                        Layout.preferredWidth: sendLbl.implicitWidth + Math.round(_sp * 1.6)
-                        Layout.minimumWidth: Math.round(_sp * 5.0)
-                        Layout.preferredHeight: Math.round(_sp * 3.0)
-                        Layout.minimumHeight: Math.round(_sp * 3.0)
-                        radius: Math.round(_sp * 0.35)
+                        id: sendBtn
+                        anchors { right: parent.right; verticalCenter: parent.verticalCenter
+                                  rightMargin: Math.round(_sp * 0.3) }
+                        width: Math.round(_sp * 2.8); height: width; radius: width / 2
                         property bool sendBtnEnabled: _agentOK && (_agentBusy || inputField.text.trim().length > 0)
                         color: _agentBusy ? _accentRed
-                             : (sendBtnEnabled ? (sendHover.hovered ? _accentCyan : Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.85)) : _bgDark)
+                             : (sendBtnEnabled ? (sendHover.hovered ? _accentCyan : Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.85))
+                                               : Qt.rgba(_borderDim.r, _borderDim.g, _borderDim.b, 0.3))
                         Text {
                             id: sendLbl; anchors.centerIn: parent
-                            text: _agentBusy ? "■ 停止" : "▶ 发送"
+                            text: _agentBusy ? "■" : "↑"
                             color: _agentBusy ? qgcPal.buttonHighlightText : (parent.sendBtnEnabled ? qgcPal.primaryButtonText : _textDim)
-                            font { pixelSize: Math.round(_sp * 1.0); weight: Font.Medium }
+                            font { pixelSize: Math.round(_sp * 1.2); weight: Font.Bold }
                         }
                         MouseArea {
                             id: sendArea
@@ -946,11 +1003,11 @@ Rectangle {
                             anchors { fill: parent; margins: Math.round(_sp * 0.7) }
                             spacing: Math.round(_sp * 0.3)
                             Text { text: "AI Agent"; color: _textDim; font { pixelSize: Math.round(_sp * 0.75); bold: true } }
-                            Text { text: "状态: " + (_agentBusy ? "处理中" : _agentOK ? "就绪" : "未配置")
+                            Text { text: "Status: " + (_agentBusy ? "Processing" : _agentOK ? "Ready" : "Not Configured")
                                 color: _agentBusy ? _accentOrange : _agentOK ? _accentGreen : _accentRed
                                 font.pixelSize: _sp }
-                            Text { text: "模式: " + (_agentAuto ? "自主执行" : "手动确认"); color: _textPrimary; font.pixelSize: _sp; visible: _agentOK }
-                            Text { text: "Token: " + (_agentOK && _agentMgr ? (_agentMgr.totalTokens / 1000).toFixed(1) + "K" : "0"); color: _textPrimary; font.pixelSize: _sp; visible: _agentOK }
+                            Text { text: "Mode: " + (_agentAuto ? "Autonomous" : "Manual"); color: _textPrimary; font.pixelSize: _sp; visible: _agentOK }
+                            Text { text: "Tokens: " + (_agentOK && _agentMgr ? (_agentMgr.totalTokens / 1000).toFixed(1) + "K" : "0"); color: _textPrimary; font.pixelSize: _sp; visible: _agentOK }
                         }
                     }
 
@@ -1113,7 +1170,8 @@ Rectangle {
                                         radius: Math.round(_sp * 0.3); color: _bgDark
                                         border { color: apiKeyField.text.length === 0 ? _accentRed : _borderDim; width: 1 }
                                     }
-                                    color: qgcPal.textFieldText
+                                    color: _textPrimary
+                                    placeholderTextColor: _textDim
                                 }
                                 Rectangle {
                                     Layout.preferredWidth: toggleApiText.implicitWidth + _sp * 1.4
@@ -1150,7 +1208,8 @@ Rectangle {
                                         radius: Math.round(_sp * 0.3); color: _bgDark
                                         border { color: baseUrlField.text.length === 0 ? _accentRed : _borderDim; width: 1 }
                                     }
-                                    color: qgcPal.textFieldText
+                                    color: _textPrimary
+                                    placeholderTextColor: _textDim
                                 }
                                 Rectangle {
                                     Layout.preferredWidth: testBtn.implicitWidth + _sp * 1.2
@@ -1275,7 +1334,8 @@ Rectangle {
                                     radius: Math.round(_sp * 0.3); color: _bgDark
                                     border { color: _borderDim; width: 1 }
                                 }
-                                color: qgcPal.textFieldText
+                                color: _textPrimary
+                                placeholderTextColor: _textDim
                             }
                         }
                     }
@@ -1317,11 +1377,529 @@ Rectangle {
                     }
                 }
             }
+
+            // ──────────── TAB 4: KNOWLEDGE BASE (RAG) ────────────
+            Flickable {
+                contentWidth: width
+                contentHeight: ragCol.implicitHeight
+                clip: true; flickableDirection: Flickable.VerticalFlick
+                boundsBehavior: Flickable.StopAtBounds
+
+                ColumnLayout {
+                    id: ragCol
+                    width: parent.width
+                    spacing: Math.round(_sp * 0.6)
+
+                    // ── Header + RAG status ──
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text {
+                            text: "📚 知识库检索 (RAG)"
+                            color: _accentCyan
+                            font { pixelSize: Math.round(_sp * 1.1); bold: true }
+                        }
+                        Item { Layout.fillWidth: true }
+                        Rectangle {
+                            Layout.preferredWidth: ragStatusText.implicitWidth + _sp * 1.0
+                            Layout.preferredHeight: Math.round(_sp * 1.8)
+                            Layout.alignment: Qt.AlignVCenter
+                            radius: height / 2
+                            readonly property bool ragOn: _agentMgr ? _agentMgr.ragEnabled : false
+                            color: ragOn ? Qt.rgba(_accentGreen.r, _accentGreen.g, _accentGreen.b, 0.12)
+                                         : Qt.rgba(_textDim.r, _textDim.g, _textDim.b, 0.08)
+                            border.color: ragOn ? _accentGreen : _borderDim; border.width: 1
+                            Text {
+                                id: ragStatusText
+                                anchors.centerIn: parent
+                                text: parent.ragOn ? "● 已启用" : "○ 未启用"
+                                color: parent.ragOn ? _accentGreen : _textDim
+                                font { pixelSize: Math.round(_sp * 0.8); bold: true }
+                            }
+                        }
+                    }
+
+                    // ── Description ──
+                    Text {
+                        Layout.fillWidth: true
+                        font.pixelSize: Math.round(_sp * 0.75)
+                        color: _textDim
+                        wrapMode: Text.Wrap
+                        text: "配置云端知识库检索端点。每次对话自动检索相关知识，LLM 也可主动调用 retrieve_knowledge 工具深度检索。"
+                    }
+
+                    // ── Card: 启用设置 ──
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: ragToggleInner.implicitHeight + Math.round(_sp * 1.2)
+                        radius: Math.round(_sp * 0.4)
+                        color: _bgCard
+                        border.color: _borderDim; border.width: 1
+                        ColumnLayout {
+                            id: ragToggleInner
+                            anchors.fill: parent; anchors.margins: Math.round(_sp * 0.6)
+                            spacing: Math.round(_sp * 0.4)
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    text: "启用 RAG 检索"
+                                    color: _textPrimary
+                                    font { pixelSize: Math.round(_sp * 0.95); bold: true }
+                                    Layout.fillWidth: true
+                                }
+                                // Custom toggle
+                                Rectangle {
+                                    Layout.preferredWidth: Math.round(_sp * 3.6)
+                                    Layout.preferredHeight: Math.round(_sp * 1.8)
+                                    Layout.alignment: Qt.AlignVCenter
+                                    radius: height / 2
+                                    readonly property bool ragOn: _agentMgr ? _agentMgr.ragEnabled : false
+                                    color: ragOn ? _accentGreen : _bgDark
+                                    border.color: ragOn ? _accentGreen : _borderDim
+                                    border.width: 1
+                                    Behavior on color { ColorAnimation { duration: 150 } }
+
+                                    Rectangle {
+                                        readonly property real _knob: parent.height - Math.round(_sp * 0.5)
+                                        width: _knob; height: _knob
+                                        radius: width / 2
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        x: parent.ragOn ? parent.width - width - Math.round(_sp * 0.25) : Math.round(_sp * 0.25)
+                                        color: parent.ragOn ? "#ffffff" : _textDim
+                                        Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutQuad } }
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (_agentMgr) _agentMgr.setRagEnabled(!parent.ragOn)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Card: RAG 配置 ──
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: ragConfigInner.implicitHeight + Math.round(_sp * 1.2)
+                        radius: Math.round(_sp * 0.4)
+                        color: _bgCard
+                        border.color: _borderDim; border.width: 1
+                        ColumnLayout {
+                            id: ragConfigInner
+                            anchors.fill: parent; anchors.margins: Math.round(_sp * 0.6)
+                            spacing: Math.round(_sp * 0.4)
+
+                            Text {
+                                text: "RAG 配置"
+                                color: _textDim
+                                font.pixelSize: Math.round(_sp * 0.75)
+                                font.capitalization: Font.AllUppercase
+                            }
+
+                            // Endpoint URL
+                            Text { text: "检索端点 URL"; font.pixelSize: Math.round(_sp * 0.9); color: _textPrimary }
+                            TextField {
+                                id: ragEndpointField
+                                Layout.fillWidth: true
+                                text: _agentMgr ? _agentMgr.ragEndpoint : ""
+                                placeholderText: "https://dify.example.com/v1/datasets/{id}/retrieve"
+                                color: _textPrimary
+                                placeholderTextColor: _textDim
+                                font.pixelSize: Math.round(_sp * 0.95)
+                                selectByMouse: true
+                                background: Rectangle {
+                                    radius: Math.round(_sp * 0.3); color: _bgDark
+                                    border { color: ragEndpointHover.hovered ? _accentCyan : _borderDim; width: 1 }
+                                }
+                                onEditingFinished: {
+                                    if (_agentMgr) _agentMgr.setRagEndpoint(text)
+                                }
+                                HoverHandler { id: ragEndpointHover }
+                            }
+                            Text {
+                                font.pixelSize: Math.round(_sp * 0.7); color: _textDim
+                                text: "Dify: https://{host}/v1/datasets/{dataset_id}/retrieve"
+                            }
+
+                            // API Key
+                            Text { text: "RAG API Key（留空则复用主 API Key）"; font.pixelSize: Math.round(_sp * 0.9); color: _textPrimary }
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: Math.round(_sp * 0.3)
+                                TextField {
+                                    id: ragKeyField
+                                    Layout.fillWidth: true
+                                    text: _agentMgr ? _agentMgr.ragApiKey : ""
+                                    placeholderText: "留空复用主 API Key"
+                                    echoMode: TextInput.Password
+                                    color: qgcPal.textFieldText
+                                    font.pixelSize: Math.round(_sp * 0.95)
+                                    selectByMouse: true
+                                    background: Rectangle {
+                                        radius: Math.round(_sp * 0.3); color: _bgDark
+                                        border { color: ragKeyHover.hovered ? _accentCyan : _borderDim; width: 1 }
+                                    }
+                                    onEditingFinished: {
+                                        if (_agentMgr) _agentMgr.setRagApiKey(text)
+                                    }
+                                    HoverHandler { id: ragKeyHover }
+                                }
+                                Rectangle {
+                                    Layout.preferredWidth: ragKeyToggleText.implicitWidth + _sp * 1.4
+                                    Layout.preferredHeight: Math.round(_sp * 2.0)
+                                    Layout.alignment: Qt.AlignVCenter
+                                    radius: Math.round(_sp * 0.25)
+                                    color: ragKeyTogHover.hovered ? Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.1) : "transparent"
+                                    Text {
+                                        id: ragKeyToggleText; anchors.centerIn: parent
+                                        text: ragKeyField.echoMode === TextInput.Normal ? "隐藏" : "显示"
+                                        color: _accentCyan; font.pixelSize: _sp
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                        onClicked: { ragKeyField.echoMode = ragKeyField.echoMode === TextInput.Normal ? TextInput.Password : TextInput.Normal }
+                                    }
+                                    HoverHandler { id: ragKeyTogHover }
+                                }
+                            }
+
+                            // Test button + result
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: Math.round(_sp * 0.3)
+                                Rectangle {
+                                    Layout.preferredWidth: ragTestBtn.implicitWidth + _sp * 1.2
+                                    Layout.preferredHeight: Math.round(_sp * 2.0)
+                                    Layout.alignment: Qt.AlignVCenter
+                                    radius: Math.round(_sp * 0.3)
+                                    property bool testEnabled: _agentMgr && _agentMgr.ragEnabled && ragEndpointField.text.length > 0 && !_agentBusy
+                                    color: testEnabled ? (testRagHover.hovered ? _accentCyan : Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.8))
+                                                       : _bgDark
+                                    border { color: testEnabled ? _accentCyan : _borderDim; width: 1 }
+                                    Text {
+                                        id: ragTestBtn; anchors.centerIn: parent
+                                        text: "🔌 测试连接"
+                                        color: parent.testEnabled ? qgcPal.primaryButtonText : _textDim
+                                        font { pixelSize: _sp; bold: true }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                        enabled: parent.testEnabled
+                                        onClicked: {
+                                            if (_agentMgr) {
+                                                _agentMgr.setRagEndpoint(ragEndpointField.text)
+                                                _agentMgr.setRagApiKey(ragKeyField.text)
+                                                _agentMgr.testRagConnection()
+                                            }
+                                        }
+                                    }
+                                    HoverHandler { id: testRagHover }
+                                }
+                                Text {
+                                    id: ragTestResultText
+                                    Layout.fillWidth: true
+                                    font.pixelSize: Math.round(_sp * 0.8)
+                                    color: _textDim
+                                    wrapMode: Text.Wrap
+                                    visible: text.length > 0
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Card: 使用说明 ──
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: ragInfoCol.implicitHeight + Math.round(_sp * 1.2)
+                        radius: Math.round(_sp * 0.4)
+                        color: Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.05)
+                        border { color: Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.2); width: 1 }
+                        ColumnLayout {
+                            id: ragInfoCol
+                            anchors.fill: parent; anchors.margins: Math.round(_sp * 0.6)
+                            spacing: Math.round(_sp * 0.3)
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "📖 使用说明"
+                                color: _accentCyan
+                                font { pixelSize: Math.round(_sp * 0.9); bold: true }
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                font.pixelSize: Math.round(_sp * 0.75)
+                                color: _textPrimary
+                                wrapMode: Text.Wrap
+                                text: "1. 在 Dify/百炼平台创建知识库，上传无人机文档\n" +
+                                      "2. 获取知识库检索 API 端点和 Key\n" +
+                                      "3. 填入上方配置并启用\n" +
+                                      "4. 对话时自动检索 top-3 知识片段注入上下文\n" +
+                                      "5. LLM 也可通过 retrieve_knowledge 工具主动检索"
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                font.pixelSize: Math.round(_sp * 0.7)
+                                color: _textDim
+                                wrapMode: Text.Wrap
+                                text: "推荐平台：Dify（自建/云）、阿里云百炼、MaxKB\n兼容 Dify retrieve 端点格式"
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ──────────── TAB 5: ARCHIVES ────────────
+            ColumnLayout {
+                Layout.fillWidth: true; Layout.fillHeight: true
+                spacing: Math.round(_sp * 0.4)
+
+                // Properties for archive view state
+                property string selectedArchiveId: ""
+                property var selectedMessages: []
+
+                // ── Header ──
+                RowLayout {
+                    Layout.fillWidth: true; spacing: Math.round(_sp * 0.4)
+
+                    Text {
+                        text: "Chat Archives"
+                        color: _textPrimary; font { pixelSize: _sp; bold: true }
+                    }
+                    Item { Layout.fillWidth: true }
+                    Text {
+                        text: _agentOK ? (_agentMgr.archiveCount() + " archived") : "0 archived"
+                        color: _textDim; font.pixelSize: Math.round(_sp * 0.8)
+                    }
+
+                    // Archive Current button
+                    Rectangle {
+                        Layout.preferredWidth: archiveBtn.implicitWidth + _sp * 1.2
+                        Layout.preferredHeight: Math.round(_sp * 2.0)
+                        radius: Math.round(_sp * 0.3)
+                        color: archiveBtnHover.hovered ? Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.2) : _bgDark
+                        border { color: _accentCyan; width: 1 }
+                        Text {
+                            id: archiveBtn; anchors.centerIn: parent
+                            text: "📦 Archive Current"; color: _accentCyan
+                            font { pixelSize: Math.round(_sp * 0.85); bold: true }
+                        }
+                        MouseArea {
+                            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (_agentOK) {
+                                    _agentMgr.archiveCurrentChat()
+                                    archiveList.model = _agentMgr.listArchives()
+                                }
+                            }
+                        }
+                        HoverHandler { id: archiveBtnHover }
+                    }
+
+                    // Refresh button
+                    Rectangle {
+                        Layout.preferredWidth: Math.round(_sp * 2.4)
+                        Layout.preferredHeight: Math.round(_sp * 2.0)
+                        radius: Math.round(_sp * 0.3)
+                        color: refreshArchHover.hovered ? Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.15) : _bgDark
+                        border { color: _borderDim; width: 1 }
+                        Text {
+                            anchors.centerIn: parent; text: "↻"
+                            color: _textPrimary; font.pixelSize: _sp
+                        }
+                        MouseArea {
+                            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (_agentOK) archiveList.model = _agentMgr.listArchives()
+                            }
+                        }
+                        HoverHandler { id: refreshArchHover }
+                    }
+                }
+
+                // ── Content area ──
+                // List view (when no archive selected) or detail view (when selected)
+                StackLayout {
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    currentIndex: parent.selectedArchiveId === "" ? 0 : 1
+
+                    // ── Archive List ──
+                    ScrollView {
+                        Layout.fillWidth: true; Layout.fillHeight: true
+                        clip: true
+
+                        ListView {
+                            id: archiveList
+                            model: _agentOK ? _agentMgr.listArchives() : []
+                            spacing: Math.round(_sp * 0.3)
+                            delegate: Rectangle {
+                                width: archiveList.width
+                                height: archItemCol.implicitHeight + Math.round(_sp * 0.8)
+                                radius: Math.round(_sp * 0.3)
+                                color: archItemHover.hovered ? Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.08) : _bgDark
+                                border { color: _borderDim; width: 1 }
+
+                                ColumnLayout {
+                                    id: archItemCol
+                                    anchors { fill: parent; margins: Math.round(_sp * 0.5) }
+                                    spacing: Math.round(_sp * 0.2)
+
+                                    RowLayout {
+                                        Layout.fillWidth: true; spacing: Math.round(_sp * 0.3)
+
+                                        Text {
+                                            text: modelData.timestamp
+                                            color: _accentCyan; font { pixelSize: Math.round(_sp * 0.85); bold: true }
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        Text {
+                                            text: modelData.messageCount + " msgs"
+                                            color: _textDim; font.pixelSize: Math.round(_sp * 0.75)
+                                        }
+
+                                        // Delete button
+                                        Rectangle {
+                                            Layout.preferredWidth: Math.round(_sp * 1.8)
+                                            Layout.preferredHeight: Math.round(_sp * 1.6)
+                                            radius: Math.round(_sp * 0.2)
+                                            color: delArchHover.hovered ? Qt.rgba(_accentRed.r, _accentRed.g, _accentRed.b, 0.2) : "transparent"
+                                            border { color: _accentRed; width: 1 }
+                                            Text {
+                                                anchors.centerIn: parent; text: "✕"
+                                                color: _accentRed; font.pixelSize: Math.round(_sp * 0.7)
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    if (_agentOK) {
+                                                        _agentMgr.deleteArchive(modelData.id)
+                                                        archiveList.model = _agentMgr.listArchives()
+                                                    }
+                                                }
+                                            }
+                                            HoverHandler { id: delArchHover }
+                                        }
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.preview || "(empty)"
+                                        color: _textDim; font.pixelSize: Math.round(_sp * 0.75)
+                                        elide: Text.ElideRight; maximumLineCount: 2
+                                        wrapMode: Text.Wrap
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (_agentOK) {
+                                            var msgs = _agentMgr.loadArchiveMessages(modelData.id)
+                                            parent.parent.parent.parent.selectedArchiveId = modelData.id
+                                            parent.parent.parent.parent.selectedMessages = msgs
+                                        }
+                                    }
+                                }
+                                HoverHandler { id: archItemHover }
+                            }
+
+                            // Empty state
+                            Text {
+                                anchors.centerIn: parent
+                                visible: archiveList.count === 0
+                                text: "No archived chats.\nClick 'Archive Current' to save."
+                                color: _textDim; font.pixelSize: _sp
+                                horizontalAlignment: Text.AlignHCenter
+                            }
+                        }
+                    }
+
+                    // ── Archive Detail View ──
+                    ColumnLayout {
+                        Layout.fillWidth: true; Layout.fillHeight: true
+                        spacing: Math.round(_sp * 0.4)
+
+                        // Back button + title
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Math.round(_sp * 0.4)
+
+                            Rectangle {
+                                Layout.preferredWidth: backBtn.implicitWidth + _sp * 1.0
+                                Layout.preferredHeight: Math.round(_sp * 2.0)
+                                radius: Math.round(_sp * 0.3)
+                                color: backHover.hovered ? Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.15) : _bgDark
+                                border { color: _borderDim; width: 1 }
+                                Text {
+                                    id: backBtn; anchors.centerIn: parent
+                                    text: "← Back"; color: _accentCyan
+                                    font { pixelSize: Math.round(_sp * 0.85); bold: true }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        var tab = parent.parent.parent
+                                        tab.selectedArchiveId = ""
+                                        tab.selectedMessages = []
+                                    }
+                                }
+                                HoverHandler { id: backHover }
+                            }
+
+                            Text {
+                                text: "Viewing Archive"
+                                color: _textPrimary; font { pixelSize: _sp; bold: true }
+                            }
+                            Item { Layout.fillWidth: true }
+                        }
+
+                        // Message list
+                        ScrollView {
+                            Layout.fillWidth: true; Layout.fillHeight: true
+                            clip: true
+
+                            ListView {
+                                id: archiveMsgList
+                                model: parent.parent.parent.selectedMessages
+                                spacing: Math.round(_sp * 0.3)
+
+                                delegate: Rectangle {
+                                    width: archiveMsgList.width
+                                    height: archMsgCol.implicitHeight + Math.round(_sp * 0.6)
+                                    radius: Math.round(_sp * 0.3)
+                                    color: modelData.role === "user" ? Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.06) :
+                                           modelData.role === "assistant" ? Qt.rgba(_accentGreen.r, _accentGreen.g, _accentGreen.b, 0.06) :
+                                           _bgDark
+                                    border { color: _borderDim; width: 1 }
+
+                                    ColumnLayout {
+                                        id: archMsgCol
+                                        anchors { fill: parent; margins: Math.round(_sp * 0.4) }
+                                        spacing: Math.round(_sp * 0.15)
+
+                                        Text {
+                                            text: modelData.role === "user" ? "User" :
+                                                  modelData.role === "assistant" ? "Assistant" :
+                                                  modelData.role === "system" ? "System" : modelData.role
+                                            color: modelData.role === "user" ? _accentCyan :
+                                                   modelData.role === "assistant" ? _accentGreen : _textDim
+                                            font { pixelSize: Math.round(_sp * 0.7); bold: true }
+                                        }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: modelData.content || ""
+                                            color: _textPrimary
+                                            font.pixelSize: Math.round(_sp * 0.85)
+                                            wrapMode: Text.Wrap
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
-
-    // ════════════════════════════════════════════════════
-    //  Command Confirmation Popup
     // ════════════════════════════════════════════════════
     Rectangle {
         anchors.fill: parent
@@ -1665,6 +2243,9 @@ Rectangle {
         function onLogAnalysisReady(report) {
             // Auto-switch to Charts tab when analysis completes
             currentTab = 2
+        }
+        function onRagTestResult(message) {
+            ragTestResultText.text = message
         }
     }
 }
