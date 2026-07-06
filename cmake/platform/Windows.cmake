@@ -51,6 +51,7 @@ endif()
 
 if(MSVC)
     # qt_add_win_app_sdk(${CMAKE_PROJECT_NAME} PRIVATE)
+    target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE /bigobj)
 endif()
 
 message(STATUS "QGC: Windows platform configuration applied")

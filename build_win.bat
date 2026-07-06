@@ -22,9 +22,7 @@ set "GIT_DIR=C:\git\cmd"
 if not exist "%GIT_DIR%\git.exe" set "GIT_DIR=C:\Program Files\Git\cmd"
 if exist "%GIT_DIR%\git.exe" (
     set "PATH=%GIT_DIR%;%PATH%"
-    "%GIT_DIR%\git.exe" config --global http.proxy http://127.0.0.1:2334 2>nul
-    "%GIT_DIR%\git.exe" config --global https.proxy http://127.0.0.1:2334 2>nul
-    echo [OK] Git added to PATH, proxy configured
+    echo [OK] Git added to PATH
 ) else (
     echo [WARN] Git not found
 )
@@ -71,7 +69,7 @@ rem --- Configure ---
 if /i "%ACTION%"=="configure" (
     echo.
     echo ======== CMake Configure ========
-    cmake --preset Windows -B build\Windows -DQGC_USE_CACHE=OFF -DGIT_EXECUTABLE="C:/git/cmd/git.exe"
+    cmake --preset Windows -B "%USERPROFILE%\qgc-build" -DQGC_USE_CACHE=OFF -DGIT_EXECUTABLE="C:/git/cmd/git.exe"
     if errorlevel 1 (
         echo [FAILED] CMake configure failed
         exit /b 1
@@ -86,7 +84,7 @@ if /i "%ACTION%"=="build" (
     if "!CONFIG!"=="" set "CONFIG=Debug"
     echo.
     echo ======== CMake Build !CONFIG! ========
-    cmake --build build\Windows --config !CONFIG! --parallel
+    cmake --build "%USERPROFILE%\qgc-build" --config !CONFIG! --parallel
     if errorlevel 1 (
         echo [FAILED] Build failed
         exit /b 1
@@ -99,7 +97,7 @@ rem --- Build Release ---
 if /i "%ACTION%"=="release" (
     echo.
     echo ======== CMake Build Release ========
-    cmake --build build\Windows --config Release --parallel
+    cmake --build "%USERPROFILE%\qgc-build" --config Release --parallel
     if errorlevel 1 (
         echo [FAILED] Release build failed
         exit /b 1
@@ -111,7 +109,7 @@ if /i "%ACTION%"=="release" (
 rem --- Clean ---
 if /i "%ACTION%"=="clean" (
     echo ======== Cleaning ========
-    if exist build\Windows rmdir /s /q build\Windows
+    if exist "%USERPROFILE%\qgc-build" rmdir /s /q "%USERPROFILE%\qgc-build"
     echo [OK] Clean complete
     goto :end
 )
