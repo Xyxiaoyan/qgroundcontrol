@@ -5,8 +5,8 @@
 
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QJsonArray>
 #include <QtCore/QUrl>
-#include <QtCore/QUrlQuery>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
@@ -19,88 +19,270 @@ AgentMapProvider::AgentMapProvider(QObject *parent)
     , _network(new QNetworkAccessManager(this))
     , _refreshTimer(new QTimer(this))
 {
-    _refreshTimer->setInterval(30000); // 每 30 秒刷新一次
+    _refreshTimer->setInterval(30000);
     connect(_refreshTimer, &QTimer::timeout, this, &AgentMapProvider::_onRefreshTimer);
 }
 
 void AgentMapProvider::setGeocodeApiKey(const QString &key)
 {
     if (_geocodeApiKey == key) {
-        qWarning() << "[Geocode] Key 未变化，跳过";
+        qWarning() << "[MCP] Key unchanged, skipping";
         return;
     }
     _geocodeApiKey = key;
-    _refreshTimer->start();
-    qWarning() << "[Geocode] Key 已设置, timer 已启动";
+    _mcpInitialized = false;
+    _mcpSessionId.clear();
 
-    // 如果已有飞行器，立即触发一次查询
+    if (key.isEmpty()) {
+        _mcpEndpoint.clear();
+        _refreshTimer->stop();
+        qWarning() << "[MCP] Key cleared";
+        return;
+    }
+
+    _mcpEndpoint = QStringLiteral("https://mcp.amap.com/mcp?key=%1").arg(key);
+    _refreshTimer->start();
+    qWarning() << "[MCP] Key set, endpoint:" << _mcpEndpoint;
+
     Vehicle *v = MultiVehicleManager::instance()->activeVehicle();
     if (v) {
         QGeoCoordinate coord = v->coordinate();
         if (coord.isValid()) {
             _triggerGeocode(coord.latitude(), coord.longitude());
         } else {
-            qWarning() << "[Geocode] 飞机已连接但坐标无效, 等待 timer";
+            qWarning() << "[MCP] Vehicle connected but coord invalid, waiting for timer";
         }
     } else {
-        qWarning() << "[Geocode] 无飞机连接, 监听 activeVehicleChanged";
-        // 等飞机连上后立刻触发
+        qWarning() << "[MCP] No vehicle, listening for activeVehicleChanged";
         connect(MultiVehicleManager::instance(), &MultiVehicleManager::activeVehicleChanged,
                 this, [this](Vehicle *vehicle) {
             if (!vehicle || _geocodeApiKey.isEmpty()) return;
             QGeoCoordinate coord = vehicle->coordinate();
             if (coord.isValid()) {
-                qWarning() << "[Geocode] 飞机连接, 触发首次查询";
+                qWarning() << "[MCP] Vehicle connected, triggering first query";
                 _triggerGeocode(coord.latitude(), coord.longitude());
             }
-        }, Qt::SingleShotConnection); // 只触发一次，之后靠 timer
+        }, Qt::SingleShotConnection);
     }
 }
 
 void AgentMapProvider::requestAddress()
 {
     if (_geocodeApiKey.isEmpty()) {
-        qWarning() << "[Geocode] requestAddress 但 Key 为空";
+        qWarning() << "[MCP] requestAddress but Key is empty";
         return;
     }
     Vehicle *v = MultiVehicleManager::instance()->activeVehicle();
     if (!v) {
-        qWarning() << "[Geocode] requestAddress 但无飞机连接";
+        qWarning() << "[MCP] requestAddress but no vehicle";
         return;
     }
     QGeoCoordinate coord = v->coordinate();
     if (!coord.isValid()) {
-        qWarning() << "[Geocode] requestAddress 但坐标无效";
+        qWarning() << "[MCP] requestAddress but coord invalid";
         return;
     }
     Q_UNUSED(v);
-    // 无视 50m 限制，直接触发
     _triggerGeocode(coord.latitude(), coord.longitude());
 }
+
+// ═══ MCP protocol helpers ═══
+
+QNetworkRequest AgentMapProvider::_makeMcpRequest() const
+{
+    QNetworkRequest req((QUrl(_mcpEndpoint)));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setRawHeader("Accept", "application/json, text/event-stream");
+    if (!_mcpSessionId.isEmpty()) {
+        req.setRawHeader("Mcp-Session-Id", _mcpSessionId.toUtf8());
+    }
+    req.setTransferTimeout(10000);
+    return req;
+}
+
+void AgentMapProvider::_ensureMcpInitialized()
+{
+    if (_mcpInitialized || _mcpEndpoint.isEmpty()) return;
+
+    QJsonObject request;
+    request[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+    request[QStringLiteral("id")] = ++_mcpRequestId;
+    request[QStringLiteral("method")] = QStringLiteral("initialize");
+
+    QJsonObject params;
+    params[QStringLiteral("protocolVersion")] = QStringLiteral("2024-11-05");
+    params[QStringLiteral("capabilities")] = QJsonObject{};
+
+    QJsonObject clientInfo;
+    clientInfo[QStringLiteral("name")] = QStringLiteral("qgc-agent");
+    clientInfo[QStringLiteral("version")] = QStringLiteral("1.0.0");
+    params[QStringLiteral("clientInfo")] = clientInfo;
+    request[QStringLiteral("params")] = params;
+
+    QNetworkRequest req = _makeMcpRequest();
+    QNetworkReply *reply = _network->post(req, QJsonDocument(request).toJson(QJsonDocument::Compact));
+
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    if (reply->hasRawHeader("Mcp-Session-Id")) {
+        _mcpSessionId = QString::fromUtf8(reply->rawHeader("Mcp-Session-Id"));
+        qWarning() << "[MCP] Session ID:" << _mcpSessionId;
+    }
+
+    if (reply->error() != QNetworkReply::NoError) {
+        qWarning() << "[MCP] Initialize failed:" << reply->errorString();
+        reply->deleteLater();
+        return;
+    }
+
+    QString contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString();
+    QByteArray data = reply->readAll();
+    reply->deleteLater();
+
+    QJsonObject response = _parseMcpResponse(data, contentType);
+    if (response.isEmpty()) {
+        qWarning() << "[MCP] Initialize response parse failed";
+        return;
+    }
+
+    if (response.contains(QStringLiteral("error"))) {
+        qWarning() << "[MCP] Initialize error:" << response[QStringLiteral("error")].toObject()[QStringLiteral("message")].toString();
+        return;
+    }
+
+    qWarning() << "[MCP] Initialized successfully";
+    _mcpInitialized = true;
+
+    // Send notifications/initialized (fire-and-forget)
+    QJsonObject notif;
+    notif[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+    notif[QStringLiteral("method")] = QStringLiteral("notifications/initialized");
+
+    QNetworkRequest notifReq = _makeMcpRequest();
+    QNetworkReply *notifReply = _network->post(notifReq, QJsonDocument(notif).toJson(QJsonDocument::Compact));
+    notifReply->deleteLater();
+}
+
+QString AgentMapProvider::_callMcpTool(const QString &toolName, const QJsonObject &arguments)
+{
+    _ensureMcpInitialized();
+    if (!_mcpInitialized) {
+        qWarning() << "[MCP] Not initialized, cannot call tool:" << toolName;
+        return {};
+    }
+
+    QJsonObject request;
+    request[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+    request[QStringLiteral("id")] = ++_mcpRequestId;
+    request[QStringLiteral("method")] = QStringLiteral("tools/call");
+
+    QJsonObject params;
+    params[QStringLiteral("name")] = toolName;
+    params[QStringLiteral("arguments")] = arguments;
+    request[QStringLiteral("params")] = params;
+
+    QNetworkRequest req = _makeMcpRequest();
+    QNetworkReply *reply = _network->post(req, QJsonDocument(request).toJson(QJsonDocument::Compact));
+
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    if (reply->hasRawHeader("Mcp-Session-Id")) {
+        _mcpSessionId = QString::fromUtf8(reply->rawHeader("Mcp-Session-Id"));
+    }
+
+    if (reply->error() != QNetworkReply::NoError) {
+        qWarning() << "[MCP] Network error:" << reply->errorString();
+        reply->deleteLater();
+        return {};
+    }
+
+    QString contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString();
+    QByteArray data = reply->readAll();
+    reply->deleteLater();
+
+    QJsonObject response = _parseMcpResponse(data, contentType);
+    if (response.isEmpty()) {
+        qWarning() << "[MCP] Failed to parse response for tool:" << toolName;
+        return {};
+    }
+
+    if (response.contains(QStringLiteral("error"))) {
+        QJsonObject err = response[QStringLiteral("error")].toObject();
+        qWarning() << "[MCP] RPC error:" << err[QStringLiteral("message")].toString();
+        return {};
+    }
+
+    QJsonObject result = response[QStringLiteral("result")].toObject();
+    if (result[QStringLiteral("isError")].toBool()) {
+        QJsonArray content = result[QStringLiteral("content")].toArray();
+        if (!content.isEmpty()) {
+            qWarning() << "[MCP] Tool error:" << content.first().toObject()[QStringLiteral("text")].toString();
+        }
+        return {};
+    }
+
+    QJsonArray content = result[QStringLiteral("content")].toArray();
+    if (content.isEmpty()) {
+        qWarning() << "[MCP] Empty content for tool:" << toolName;
+        return {};
+    }
+
+    return content.first().toObject()[QStringLiteral("text")].toString();
+}
+
+QJsonObject AgentMapProvider::_parseMcpResponse(const QByteArray &data, const QString &contentType)
+{
+    QJsonDocument doc;
+
+    if (contentType.contains(QStringLiteral("text/event-stream"), Qt::CaseInsensitive)) {
+        // SSE format: parse "data:" lines
+        QString text = QString::fromUtf8(data);
+        for (const QString &line : text.split('\n')) {
+            QString trimmed = line.trimmed();
+            if (trimmed.startsWith(QStringLiteral("data:"))) {
+                QString jsonStr = trimmed.mid(5).trimmed();
+                doc = QJsonDocument::fromJson(jsonStr.toUtf8());
+                if (!doc.isNull()) break;
+            }
+        }
+    } else {
+        doc = QJsonDocument::fromJson(data);
+    }
+
+    if (doc.isNull() || !doc.isObject()) {
+        return {};
+    }
+    return doc.object();
+}
+
+// ═══ Public API methods (now using MCP tools) ═══
 
 QString AgentMapProvider::resolveAddressSync()
 {
     if (_geocodeApiKey.isEmpty()) {
-        qWarning() << "[Geocode] resolveAddressSync: Key 为空";
+        qWarning() << "[MCP] resolveAddressSync: Key is empty";
         return {};
     }
 
     Vehicle *v = MultiVehicleManager::instance()->activeVehicle();
     if (!v) {
-        qWarning() << "[Geocode] resolveAddressSync: 无飞机";
+        qWarning() << "[MCP] resolveAddressSync: no vehicle";
         return {};
     }
 
     QGeoCoordinate coord = v->coordinate();
     if (!coord.isValid()) {
-        qWarning() << "[Geocode] resolveAddressSync: 坐标无效";
+        qWarning() << "[MCP] resolveAddressSync: coord invalid";
         return {};
     }
 
     double lat = coord.latitude();
     double lon = coord.longitude();
 
-    // Reuse cache if position unchanged (< 50m)
     QGeoCoordinate cur(lat, lon);
     QGeoCoordinate prev(_lastLat, _lastLon);
     if (!_cachedAddress.isEmpty() && prev.isValid() && cur.isValid()) {
@@ -109,50 +291,24 @@ QString AgentMapProvider::resolveAddressSync()
         }
     }
 
-    QUrl url(QStringLiteral("https://restapi.amap.com/v3/geocode/regeo"));
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("key"), _geocodeApiKey);
-    query.addQueryItem(QStringLiteral("location"), QStringLiteral("%1,%2").arg(lon, 0, 'f', 6).arg(lat, 0, 'f', 6));
-    query.addQueryItem(QStringLiteral("radius"), QStringLiteral("500"));
-    query.addQueryItem(QStringLiteral("extensions"), QStringLiteral("base"));
-    url.setQuery(query);
+    QJsonObject args;
+    args[QStringLiteral("location")] = QStringLiteral("%1,%2").arg(lon, 0, 'f', 6).arg(lat, 0, 'f', 6);
 
-    QNetworkRequest request(url);
-    request.setTransferTimeout(10000);
+    QString text = _callMcpTool(QStringLiteral("maps_regeocode"), args);
+    if (text.isEmpty()) return {};
 
-    QNetworkReply *reply = _network->get(request);
-    if (!reply) {
-        qWarning() << "[Geocode] resolveAddressSync: get() 返回 nullptr";
-        return {};
-    }
-
-    QEventLoop loop;
-    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    loop.exec();
-
-    reply->deleteLater();
-
-    if (reply->error() != QNetworkReply::NoError) {
-        qWarning() << "[Geocode] resolveAddressSync: 网络错误" << reply->errorString();
-        return {};
-    }
-
-    QJsonParseError err;
-    QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &err);
-    if (err.error != QJsonParseError::NoError) {
-        qWarning() << "[Geocode] resolveAddressSync: JSON 解析失败" << err.errorString();
-        return {};
-    }
+    QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8());
+    if (doc.isNull()) return {};
 
     QJsonObject obj = doc.object();
-    if (obj[QStringLiteral("status")].toString() != QStringLiteral("1")) {
-        qWarning() << "[Geocode] resolveAddressSync: API 错误" << obj[QStringLiteral("info")].toString();
-        return {};
+    // Handle both raw REST API format and simplified MCP format
+    QString address = obj[QStringLiteral("formatted_address")].toString();
+    if (address.isEmpty()) {
+        address = obj[QStringLiteral("regeocode")]
+                      .toObject()[QStringLiteral("formatted_address")]
+                      .toString();
     }
 
-    QString address = obj[QStringLiteral("regeocode")]
-                          .toObject()[QStringLiteral("formatted_address")]
-                          .toString();
     if (!address.isEmpty()) {
         _cachedAddress = address;
         _lastFetchTime.start();
@@ -166,101 +322,185 @@ QString AgentMapProvider::resolveAddressSync()
 QString AgentMapProvider::resolveForwardGeocode(const QString &address, const QString &city)
 {
     if (_geocodeApiKey.isEmpty()) {
-        qWarning() << "[Geocode] forward: Key 为空";
+        qWarning() << "[MCP] forward: Key is empty";
         return {};
     }
     if (address.trimmed().isEmpty()) {
-        qWarning() << "[Geocode] forward: address 为空";
+        qWarning() << "[MCP] forward: address is empty";
         return {};
     }
 
-    QUrl url(QStringLiteral("https://restapi.amap.com/v3/geocode/geo"));
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("key"), _geocodeApiKey);
-    query.addQueryItem(QStringLiteral("address"), address.trimmed());
+    QJsonObject args;
+    args[QStringLiteral("address")] = address.trimmed();
     if (!city.trimmed().isEmpty()) {
-        query.addQueryItem(QStringLiteral("city"), city.trimmed());
-    }
-    url.setQuery(query);
-
-    QNetworkRequest request(url);
-    request.setTransferTimeout(10000);
-
-    QNetworkReply *reply = _network->get(request);
-    if (!reply) {
-        qWarning() << "[Geocode] forward: get() 返回 nullptr";
-        return {};
+        args[QStringLiteral("city")] = city.trimmed();
     }
 
-    QEventLoop loop;
-    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    loop.exec();
+    QString text = _callMcpTool(QStringLiteral("maps_geo"), args);
+    if (text.isEmpty()) return {};
 
-    reply->deleteLater();
-
-    if (reply->error() != QNetworkReply::NoError) {
-        qWarning() << "[Geocode] forward: 网络错误" << reply->errorString();
-        return {};
-    }
-
-    QJsonParseError err;
-    QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &err);
-    if (err.error != QJsonParseError::NoError) {
-        qWarning() << "[Geocode] forward: JSON 解析失败" << err.errorString();
-        return {};
-    }
+    QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8());
+    if (doc.isNull()) return {};
 
     QJsonObject obj = doc.object();
-    if (obj[QStringLiteral("status")].toString() != QStringLiteral("1")) {
-        qWarning() << "[Geocode] forward: API 错误" << obj[QStringLiteral("info")].toString();
-        return {};
-    }
 
+    // Try raw REST API format: {geocodes: [{location, formatted_address}]}
     QJsonArray geocodes = obj[QStringLiteral("geocodes")].toArray();
-    if (geocodes.isEmpty()) {
-        qWarning() << "[Geocode] forward: 无结果";
-        return {};
+    if (!geocodes.isEmpty()) {
+        QJsonObject first = geocodes.first().toObject();
+        QString location = first[QStringLiteral("location")].toString();
+        QString formattedAddress = first[QStringLiteral("formatted_address")].toString();
+
+        if (!location.isEmpty()) {
+            QStringList parts = location.split(',');
+            QJsonObject result;
+            result[QStringLiteral("status")] = QStringLiteral("success");
+            result[QStringLiteral("address")] = formattedAddress;
+            result[QStringLiteral("location")] = location;
+            if (parts.size() == 2) {
+                result[QStringLiteral("lng")] = parts[0].trimmed().toDouble();
+                result[QStringLiteral("lat")] = parts[1].trimmed().toDouble();
+            }
+            return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
+        }
     }
 
-    QJsonObject first = geocodes.first().toObject();
-    QString location = first[QStringLiteral("location")].toString();
-    QString formattedAddress = first[QStringLiteral("formatted_address")].toString();
-
-    if (location.isEmpty()) {
-        qWarning() << "[Geocode] forward: location 为空";
-        return {};
+    // Try simplified MCP format: {location, formatted_address}
+    QString location = obj[QStringLiteral("location")].toString();
+    if (!location.isEmpty()) {
+        QJsonObject result;
+        result[QStringLiteral("status")] = QStringLiteral("success");
+        result[QStringLiteral("address")] = obj[QStringLiteral("formatted_address")].toString();
+        result[QStringLiteral("location")] = location;
+        QStringList parts = location.split(',');
+        if (parts.size() == 2) {
+            result[QStringLiteral("lng")] = parts[0].trimmed().toDouble();
+            result[QStringLiteral("lat")] = parts[1].trimmed().toDouble();
+        }
+        return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
     }
 
-    // location is "lng,lat" — parse into components
-    QStringList parts = location.split(',');
-    QJsonObject result;
-    result[QStringLiteral("status")] = QStringLiteral("success");
-    result[QStringLiteral("address")] = formattedAddress;
-    result[QStringLiteral("location")] = location;
-    if (parts.size() == 2) {
-        result[QStringLiteral("lng")] = parts[0].trimmed().toDouble();
-        result[QStringLiteral("lat")] = parts[1].trimmed().toDouble();
-    }
-
-    return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
+    qWarning() << "[MCP] forward: no results";
+    return {};
 }
+
+QString AgentMapProvider::searchPOI(const QString &keywords, const QString &city, const QString &location, int offset)
+{
+    if (_geocodeApiKey.isEmpty()) {
+        qWarning() << "[MCP] searchPOI: Key is empty";
+        return {};
+    }
+    if (keywords.trimmed().isEmpty()) {
+        qWarning() << "[MCP] searchPOI: keywords is empty";
+        return {};
+    }
+    Q_UNUSED(location)
+    Q_UNUSED(offset)
+
+    QJsonObject args;
+    args[QStringLiteral("keywords")] = keywords.trimmed();
+    if (!city.trimmed().isEmpty()) {
+        args[QStringLiteral("city")] = city.trimmed();
+    }
+
+    return _callMcpTool(QStringLiteral("maps_search_text"), args);
+}
+
+QString AgentMapProvider::searchPOIAround(const QString &keywords, const QString &location, int radius, int offset)
+{
+    if (_geocodeApiKey.isEmpty()) {
+        qWarning() << "[MCP] searchPOIAround: Key is empty";
+        return {};
+    }
+    if (keywords.trimmed().isEmpty()) {
+        qWarning() << "[MCP] searchPOIAround: keywords is empty";
+        return {};
+    }
+    if (location.trimmed().isEmpty()) {
+        qWarning() << "[MCP] searchPOIAround: location is empty";
+        return {};
+    }
+    Q_UNUSED(offset)
+
+    QJsonObject args;
+    args[QStringLiteral("keywords")] = keywords.trimmed();
+    args[QStringLiteral("location")] = location.trimmed();
+    args[QStringLiteral("radius")] = radius;
+
+    return _callMcpTool(QStringLiteral("maps_search_around"), args);
+}
+
+QString AgentMapProvider::queryWeather(const QString &city, const QString &extensions)
+{
+    if (_geocodeApiKey.isEmpty()) {
+        qWarning() << "[MCP] queryWeather: Key is empty";
+        return {};
+    }
+    if (city.trimmed().isEmpty()) {
+        qWarning() << "[MCP] queryWeather: city is empty";
+        return {};
+    }
+    Q_UNUSED(extensions)
+
+    QJsonObject args;
+    args[QStringLiteral("city")] = city.trimmed();
+
+    return _callMcpTool(QStringLiteral("maps_weather"), args);
+}
+
+QString AgentMapProvider::planDrivingRoute(const QString &origin, const QString &destination, const QString &strategy)
+{
+    if (_geocodeApiKey.isEmpty()) {
+        qWarning() << "[MCP] planDrivingRoute: Key is empty";
+        return {};
+    }
+    if (origin.trimmed().isEmpty() || destination.trimmed().isEmpty()) {
+        qWarning() << "[MCP] planDrivingRoute: origin or destination is empty";
+        return {};
+    }
+    Q_UNUSED(strategy)
+
+    QJsonObject args;
+    args[QStringLiteral("origin")] = origin.trimmed();
+    args[QStringLiteral("destination")] = destination.trimmed();
+
+    return _callMcpTool(QStringLiteral("maps_direction_driving"), args);
+}
+
+QString AgentMapProvider::measureDistance(const QString &origins, const QString &destination, const QString &type)
+{
+    if (_geocodeApiKey.isEmpty()) {
+        qWarning() << "[MCP] measureDistance: Key is empty";
+        return {};
+    }
+    if (origins.trimmed().isEmpty() || destination.trimmed().isEmpty()) {
+        qWarning() << "[MCP] measureDistance: origins or destination is empty";
+        return {};
+    }
+
+    QJsonObject args;
+    args[QStringLiteral("origins")] = origins.trimmed();
+    args[QStringLiteral("destination")] = destination.trimmed();
+    args[QStringLiteral("type")] = type;
+
+    return _callMcpTool(QStringLiteral("maps_distance"), args);
+}
+
+// ═══ Background geocode refresh ═══
 
 void AgentMapProvider::_onRefreshTimer()
 {
     if (_geocodeApiKey.isEmpty()) {
-        qWarning() << "[Geocode] timer 触发但 Key 为空, 跳过";
         return;
     }
 
     Vehicle *v = MultiVehicleManager::instance()->activeVehicle();
     if (!v) {
-        qWarning() << "[Geocode] timer 触发但无飞机, 跳过";
         return;
     }
 
     QGeoCoordinate coord = v->coordinate();
     if (!coord.isValid()) {
-        qWarning() << "[Geocode] timer 触发但坐标无效, 跳过";
         return;
     }
 
@@ -281,60 +521,89 @@ void AgentMapProvider::_onRefreshTimer()
 void AgentMapProvider::_triggerGeocode(double lat, double lon)
 {
     if (_geocodeApiKey.isEmpty()) {
-        qWarning() << "[Geocode] Key 为空, 无法触发查询";
+        qWarning() << "[MCP] Key is empty, cannot trigger query";
+        return;
+    }
+
+    // Ensure MCP session is initialized (synchronous, one-time)
+    _ensureMcpInitialized();
+    if (!_mcpInitialized) {
+        qWarning() << "[MCP] Not initialized, skipping geocode";
         return;
     }
 
     _lastLat = lat;
     _lastLon = lon;
 
-    QUrl url(QStringLiteral("https://restapi.amap.com/v3/geocode/regeo"));
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("key"), _geocodeApiKey);
-    query.addQueryItem(QStringLiteral("location"), QStringLiteral("%1,%2").arg(lon, 0, 'f', 6).arg(lat, 0, 'f', 6));
-    query.addQueryItem(QStringLiteral("radius"), QStringLiteral("500"));
-    query.addQueryItem(QStringLiteral("extensions"), QStringLiteral("base"));
-    url.setQuery(query);
+    QJsonObject request;
+    request[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+    request[QStringLiteral("id")] = ++_mcpRequestId;
+    request[QStringLiteral("method")] = QStringLiteral("tools/call");
 
-    QNetworkRequest request(url);
-    request.setTransferTimeout(10000);
+    QJsonObject params;
+    params[QStringLiteral("name")] = QStringLiteral("maps_regeocode");
+    QJsonObject args;
+    args[QStringLiteral("location")] = QStringLiteral("%1,%2").arg(lon, 0, 'f', 6).arg(lat, 0, 'f', 6);
+    params[QStringLiteral("arguments")] = args;
+    request[QStringLiteral("params")] = params;
 
-    QNetworkReply *reply = _network->get(request);
+    QNetworkRequest req = _makeMcpRequest();
+    QNetworkReply *reply = _network->post(req, QJsonDocument(request).toJson(QJsonDocument::Compact));
+
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
 
         if (reply->error() != QNetworkReply::NoError) {
-            qWarning() << "[Geocode] API 请求失败:" << reply->errorString();
+            qWarning() << "[MCP] Geocode request failed:" << reply->errorString();
             return;
         }
 
-        QJsonParseError err;
-        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &err);
-        if (err.error != QJsonParseError::NoError) {
-            qWarning() << "[Geocode] 响应解析失败";
+        QString contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString();
+        QByteArray data = reply->readAll();
+
+        QJsonObject response = _parseMcpResponse(data, contentType);
+        if (response.isEmpty()) {
+            qWarning() << "[MCP] Geocode response parse failed";
             return;
         }
+
+        if (response.contains(QStringLiteral("error"))) {
+            qWarning() << "[MCP] Geocode RPC error:" << response[QStringLiteral("error")].toObject()[QStringLiteral("message")].toString();
+            return;
+        }
+
+        QJsonObject result = response[QStringLiteral("result")].toObject();
+        if (result[QStringLiteral("isError")].toBool()) {
+            qWarning() << "[MCP] Geocode tool error";
+            return;
+        }
+
+        QJsonArray content = result[QStringLiteral("content")].toArray();
+        if (content.isEmpty()) return;
+
+        QString text = content.first().toObject()[QStringLiteral("text")].toString();
+        QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8());
+        if (doc.isNull()) return;
 
         QJsonObject obj = doc.object();
-        if (obj[QStringLiteral("status")].toString() != QStringLiteral("1")) {
-            QString info = obj[QStringLiteral("info")].toString();
-            qWarning() << "[Geocode] API 返回错误:" << info;
-            return;
+        // Handle both raw REST API format and simplified MCP format
+        QString address = obj[QStringLiteral("formatted_address")].toString();
+        if (address.isEmpty()) {
+            address = obj[QStringLiteral("regeocode")]
+                          .toObject()[QStringLiteral("formatted_address")]
+                          .toString();
         }
 
-        QString address = obj[QStringLiteral("regeocode")]
-                              .toObject()[QStringLiteral("formatted_address")]
-                              .toString();
-        if (!address.isEmpty()) {
-            if (_cachedAddress != address) {
-                _cachedAddress = address;
-                _lastFetchTime.start();
-                qWarning() << "[Geocode] 地址已更新:" << _cachedAddress;
-                emit cachedAddressChanged();
-            }
+        if (!address.isEmpty() && _cachedAddress != address) {
+            _cachedAddress = address;
+            _lastFetchTime.start();
+            qWarning() << "[MCP] Address updated:" << _cachedAddress;
+            emit cachedAddressChanged();
         }
     });
 }
+
+// ═══ Vehicle context (unchanged) ═══
 
 QString AgentMapProvider::buildMapContext(Vehicle *v) const
 {

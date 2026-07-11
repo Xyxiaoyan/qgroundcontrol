@@ -27,6 +27,10 @@
 #include "Tools/LocationTool.h"
 #include "Tools/MissionTool.h"
 #include "Tools/RetrieveKnowledgeTool.h"
+#include "Tools/RoutePlanningTool.h"
+#include "Tools/POISearchTool.h"
+#include "Tools/WeatherTool.h"
+#include "Tools/DistanceTool.h"
 #include "CloudRAGClient.h"
 #include "ArchiveManager.h"
 
@@ -73,6 +77,10 @@ AgentManager::AgentManager(QObject *parent)
     _toolRegistry->registerTool(new LocationTool(_ctx, this));
     _toolRegistry->registerTool(new MissionTool(this));
     _toolRegistry->registerTool(new RetrieveKnowledgeTool(_ragClient, this));
+    _toolRegistry->registerTool(new RoutePlanningTool(_ctx, this));
+    _toolRegistry->registerTool(new POISearchTool(_ctx, this));
+    _toolRegistry->registerTool(new WeatherTool(_ctx, this));
+    _toolRegistry->registerTool(new DistanceTool(_ctx, this));
 
     // Create ReAct loop
     _reactLoop = new ReActLoop(_llm, _toolRegistry, _ctx, this);

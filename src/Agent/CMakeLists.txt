@@ -50,6 +50,14 @@ target_sources(${CMAKE_PROJECT_NAME}
         Tools/MissionTool.h
         Tools/RetrieveKnowledgeTool.cpp
         Tools/RetrieveKnowledgeTool.h
+        Tools/RoutePlanningTool.cpp
+        Tools/RoutePlanningTool.h
+        Tools/POISearchTool.cpp
+        Tools/POISearchTool.h
+        Tools/WeatherTool.cpp
+        Tools/WeatherTool.h
+        Tools/DistanceTool.cpp
+        Tools/DistanceTool.h
         CloudRAGClient.cpp
         CloudRAGClient.h
         ArchiveManager.cpp
