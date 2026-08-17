@@ -12,6 +12,20 @@
 
 QGC_LOGGING_CATEGORY(LLMClientLog, "qgc.agent.llm")
 
+static QString jsonValueToArgumentString(const QJsonValue &value)
+{
+    if (value.isString()) {
+        return value.toString();
+    }
+    if (value.isObject()) {
+        return QString::fromUtf8(QJsonDocument(value.toObject()).toJson(QJsonDocument::Compact));
+    }
+    if (value.isArray()) {
+        return QString::fromUtf8(QJsonDocument(value.toArray()).toJson(QJsonDocument::Compact));
+    }
+    return {};
+}
+
 /// Format HTTP/network errors into user-friendly Chinese messages with fix suggestions.
 static QString _formatHttpError(int statusCode, const QString &body, QNetworkReply::NetworkError netErr)
 {
@@ -465,7 +479,7 @@ void LLMClient::_processStreamEvent(const QByteArray &event)
                 _streamState.functionName += fcDelta[QStringLiteral("name")].toString();
             }
             if (fcDelta.contains(QStringLiteral("arguments")) && !fcDelta[QStringLiteral("arguments")].isNull()) {
-                _streamState.functionArguments += fcDelta[QStringLiteral("arguments")].toString();
+                _streamState.functionArguments += jsonValueToArgumentString(fcDelta[QStringLiteral("arguments")]);
             }
             continue;
         }
@@ -479,7 +493,7 @@ void LLMClient::_processStreamEvent(const QByteArray &event)
                 _streamState.functionName = tcFunc[QStringLiteral("name")].toString();
             }
             if (tcFunc.contains(QStringLiteral("arguments")) && !tcFunc[QStringLiteral("arguments")].isNull()) {
-                _streamState.functionArguments += tcFunc[QStringLiteral("arguments")].toString();
+                _streamState.functionArguments += jsonValueToArgumentString(tcFunc[QStringLiteral("arguments")]);
             }
             continue;
         }

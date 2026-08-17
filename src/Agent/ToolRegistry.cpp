@@ -58,14 +58,59 @@ ToolRegistry::ParsedFunctionCall ToolRegistry::parseFunctionCall(const QJsonObje
     if (fc.isEmpty()) return result;
 
     result.name = fc.value(QStringLiteral("name")).toString();
-    result.rawArguments = fc.value(QStringLiteral("arguments")).toString();
+    const QJsonValue argumentsValue = fc.value(QStringLiteral("arguments"));
+    if (argumentsValue.isObject()) {
+        result.arguments.append(argumentsValue.toObject());
+        result.rawArguments = QString::fromUtf8(QJsonDocument(argumentsValue.toObject()).toJson(QJsonDocument::Compact));
+        return result;
+    }
+    if (argumentsValue.isArray()) {
+        const QJsonArray array = argumentsValue.toArray();
+        for (const QJsonValue &value : array) {
+            if (value.isObject()) {
+                result.arguments.append(value.toObject());
+            }
+        }
+        result.rawArguments = QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact));
+        return result;
+    }
+    result.rawArguments = argumentsValue.toString();
     if (!result.rawArguments.isEmpty()) {
         QString raw = result.rawArguments.trimmed();
-        // Split concatenated JSON objects: {"k":"v"}{"k2":"v2"}... → [{"k":"v"}, {"k2":"v2"}]
+        // Parse the standard single-object form first.
         QJsonArray argList;
+        QJsonParseError parseError;
+        const QJsonDocument singleDocument = QJsonDocument::fromJson(raw.toUtf8(), &parseError);
+        if (parseError.error == QJsonParseError::NoError && singleDocument.isObject()) {
+            argList.append(singleDocument.object());
+        } else if (parseError.error == QJsonParseError::NoError && singleDocument.isArray()) {
+            for (const QJsonValue &value : singleDocument.array()) {
+                if (value.isObject()) {
+                    argList.append(value.toObject());
+                }
+            }
+        }
+
+        // Compatibility for models that concatenate objects instead of issuing
+        // separate tool calls: {"k":"v"}{"k2":"v2"}.
         int depth = 0;
         int start = -1;
-        for (int i = 0; i < raw.size(); i++) {
+        bool inString = false;
+        bool escaped = false;
+        for (int i = 0; argList.isEmpty() && i < raw.size(); i++) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (raw[i] == '\\' && inString) {
+                escaped = true;
+                continue;
+            }
+            if (raw[i] == '"') {
+                inString = !inString;
+                continue;
+            }
+            if (inString) continue;
             if (raw[i] == '{') {
                 if (depth == 0) start = i;
                 depth++;
@@ -81,20 +126,13 @@ ToolRegistry::ParsedFunctionCall ToolRegistry::parseFunctionCall(const QJsonObje
                 }
             }
         }
-        if (argList.isEmpty()) {
-            // Try parsing as single object
-            QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8());
-            if (doc.isObject()) {
-                argList.append(doc.object());
-            }
-        }
         if (argList.size() > 1) {
             qWarning() << "Split concatenated JSON into" << argList.size() << "argument sets";
         }
         result.arguments = argList;
     }
-    // If arguments string was empty or unparseable, default to a single empty object
-    // so the tool still receives a valid (empty) QJsonObject rather than nothing.
+    // An empty string is accepted for providers that omit `{}` on no-argument
+    // tools. Schema validation in ReActLoop rejects it for tools with required fields.
     if (result.arguments.isEmpty()) {
         result.arguments.append(QJsonObject());
         qWarning() << "parseFunctionCall: arguments empty/unparseable for" << result.name

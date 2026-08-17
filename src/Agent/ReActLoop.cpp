@@ -11,6 +11,7 @@
 #include "MultiVehicleManager.h"
 
 #include <QtCore/QJsonDocument>
+#include <QtCore/QStringList>
 
 ReActLoop::ReActLoop(LLMClient *llm, ToolRegistry *tools, ContextProvider *ctx, QObject *parent)
     : QObject(parent)
@@ -232,7 +233,7 @@ void ReActLoop::_onLLMResponseWithTools(const QString &content, const QJsonObjec
 
         QJsonObject tcFunc;
         tcFunc[QStringLiteral("name")] = parsed.name;
-        tcFunc[QStringLiteral("arguments")] = QString::fromUtf8(QJsonDocument(parsed.arguments).toJson(QJsonDocument::Compact));
+        tcFunc[QStringLiteral("arguments")] = QString::fromUtf8(QJsonDocument(firstArgs).toJson(QJsonDocument::Compact));
 
         QJsonObject tc;
         tc[QStringLiteral("id")] = _toolCallId;
@@ -252,6 +253,52 @@ void ReActLoop::_onLLMResponseWithTools(const QString &content, const QJsonObjec
         }
         assistantMsg[QStringLiteral("tool_calls")] = toolCalls;
         _appendMessage(assistantMsg);
+
+        // Validate required arguments before showing a confirmation dialog or
+        // executing a write. Some OpenAI-compatible streaming APIs omit or
+        // encode tool arguments differently; return a precise observation so
+        // the model can correct the call instead of forwarding an empty map.
+        const QJsonArray required = tool->parametersSchema().value(QStringLiteral("required")).toArray();
+        QStringList invalidArgumentSets;
+        for (int argumentIndex = 0; argumentIndex < parsed.arguments.size(); ++argumentIndex) {
+            const QJsonObject arguments = parsed.arguments.at(argumentIndex).toObject();
+            QStringList missingArguments;
+            for (const QJsonValue &requiredValue : required) {
+                const QString key = requiredValue.toString();
+                const QJsonValue value = arguments.value(key);
+                if (!arguments.contains(key) || value.isNull() || value.isUndefined()
+                    || (value.isString() && value.toString().trimmed().isEmpty())) {
+                    missingArguments.append(key);
+                }
+            }
+            if (!missingArguments.isEmpty()) {
+                invalidArgumentSets.append(QStringLiteral("call %1: %2")
+                    .arg(argumentIndex + 1)
+                    .arg(missingArguments.join(QStringLiteral(", "))));
+            }
+        }
+        if (!invalidArgumentSets.isEmpty()) {
+            QJsonObject error;
+            error[QStringLiteral("error")] = QStringLiteral("Tool %1 is missing required arguments (%2). Retry with a complete JSON object.")
+                .arg(parsed.name, invalidArgumentSets.join(QStringLiteral("; ")));
+            error[QStringLiteral("received_arguments")] = firstArgs;
+            emit toolResult(parsed.name, error);
+            _appendToolResult(parsed.name, error);
+            _step();
+            return;
+        }
+
+        if (tool->requiresConfirmation() && numCalls > 1) {
+            QJsonObject error;
+            error[QStringLiteral("error")] = QStringLiteral(
+                "Tool %1 changes vehicle state. Retry with exactly one argument object per tool call; do not concatenate write operations.")
+                .arg(parsed.name);
+            error[QStringLiteral("received_call_count")] = numCalls;
+            emit toolResult(parsed.name, error);
+            _appendToolResult(parsed.name, error);
+            _step();
+            return;
+        }
 
         emit functionCallReceived(parsed.name, firstArgs);
 
@@ -546,11 +593,12 @@ QString ReActLoop::_buildSystemPrompt() const
     QString prompt;
     prompt += QStringLiteral(
         "You are AgentQGC AI, a professional drone flight assistant. You control the drone via function calling.\n"
-        "Always respond in English.\n\n"
+        "Always respond in Chinese (Simplified). 始终使用简体中文回复。\n\n"
         "## Core Rules (MUST follow!)\n"
         "1. Start every task with get_vehicle_state to assess current conditions\n"
-        "2. You can call the same tool multiple times in one turn by providing multiple JSON objects: "
-        "{\"keyword\":\"BAT\"}{\"keyword\":\"GPS\"} — the system will execute each sequentially\n"
+        "2. Read-only tools may receive multiple concatenated JSON objects, for example "
+        "{\"keyword\":\"BAT\"}{\"keyword\":\"GPS\"}. Write tools such as set_parameter and mission "
+        "MUST use exactly one JSON object per tool call because each operation requires confirmation\n"
         "3. When done, give the COMPLETE final report immediately. Do NOT say 'let me organize' — give the actual report\n"
         "4. ⚠️ Generate VALID JSON arguments only! Double-check quotes, commas, and braces are paired correctly\n\n"
         "## Response Style\n"

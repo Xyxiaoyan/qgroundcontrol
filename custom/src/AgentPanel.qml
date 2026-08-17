@@ -6,7 +6,7 @@ import QGroundControl
 
 Rectangle {
     id: agentPanel
-    width: Math.min(_sp * 40, parent.width * 0.78)
+    width: Math.min(Math.max(_sp * 38, parent.width * 0.42), parent.width * 0.88)
     height: parent.height
     color: qgcPal.window
     visible: false
@@ -24,6 +24,12 @@ Rectangle {
     // ═══ Theme & scaling ═══
     readonly property var qgcPal: QGroundControl.globalPalette
     readonly property real _sp: _measureText.fontPixelSize
+    readonly property real _fontCaption: Math.round(_sp * 0.78)
+    readonly property real _fontBody: Math.round(_sp * 0.95)
+    readonly property real _fontSection: Math.round(_sp * 1.08)
+    readonly property real _fontTitle: Math.round(_sp * 1.35)
+    readonly property real _pageMargin: Math.round(_sp * 0.75)
+    readonly property real _controlHeight: Math.round(_sp * 2.6)
     Text {
         id: _measureText
         text: "X"
@@ -328,8 +334,8 @@ Rectangle {
     // ════════════════════════════════════════════════════
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: Math.round(_sp * 0.6)
-        spacing: Math.round(_sp * 0.35)
+        anchors.margins: _pageMargin
+        spacing: Math.round(_sp * 0.45)
 
         // ════ HEADER ════
         RowLayout {
@@ -338,7 +344,7 @@ Rectangle {
 
             Text {
                 text: "AI 助手"
-                font.pixelSize: Math.round(_sp * 1.5)
+                font.pixelSize: _fontTitle
                 font.weight: Font.Bold
                 color: _accentCyan
                 Layout.fillWidth: true
@@ -379,8 +385,11 @@ Rectangle {
         Rectangle { Layout.fillWidth: true; height: 1; color: _borderDim }
 
         // ════ TAB BAR (borrowed from JARVIS) ════
-        RowLayout {
-            Layout.fillWidth: true; spacing: Math.round(_sp * 0.3)
+        GridLayout {
+            Layout.fillWidth: true
+            columns: 3
+            columnSpacing: Math.round(_sp * 0.35)
+            rowSpacing: Math.round(_sp * 0.35)
 
             Repeater {
                 model: [
@@ -392,7 +401,9 @@ Rectangle {
                     { label: "🗄 归档", icon: "归档" }
                 ]
                 Rectangle {
-                    Layout.fillWidth: true; height: Math.round(_sp * 2.4); radius: Math.round(_sp * 0.3)
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: _controlHeight
+                    radius: Math.round(_sp * 0.3)
                     color: currentTab === index ? Qt.rgba(qgcPal.primaryButton.r, qgcPal.primaryButton.g, qgcPal.primaryButton.b, 0.12) : "transparent"
                     border.color: currentTab === index ? _accentCyan : _borderDim
                     border.width: 1
@@ -400,7 +411,7 @@ Rectangle {
                         anchors.centerIn: parent
                         text: modelData.label
                         color: currentTab === index ? _accentCyan : _textDim
-                        font { pixelSize: _sp; bold: true }
+                        font { pixelSize: _fontBody; bold: true }
                     }
                     MouseArea {
                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
@@ -413,7 +424,7 @@ Rectangle {
         // ── Status Bar ──
         Rectangle {
             Layout.fillWidth: true
-            height: Math.round(_sp * 3.0)
+            Layout.preferredHeight: Math.round(_sp * 2.6)
             radius: Math.round(_sp * 0.35)
             color: _statusConnected ? Qt.rgba(_accentGreen.r, _accentGreen.g, _accentGreen.b, 0.08)
                                    : Qt.rgba(_accentRed.r, _accentRed.g, _accentRed.b, 0.08)
@@ -438,7 +449,7 @@ Rectangle {
                           _statusConnected ? "OK · " + _statusMode + " · 电" + _statusBat + "% · GPS " + _statusGps
                                            : "无飞行器连接"
                     color: _statusConnected ? _accentGreen : _accentRed
-                    font.pixelSize: Math.round(_sp * 1.0)
+                    font.pixelSize: _fontBody
                     font.weight: Font.Medium
                     Layout.fillWidth: true; elide: Text.ElideRight
                     verticalAlignment: Text.AlignVCenter
@@ -453,12 +464,12 @@ Rectangle {
 
             // ──────────── TAB 0: CHAT ────────────
             ColumnLayout {
-                spacing: Math.round(_sp * 0.35)
+                spacing: Math.round(_sp * 0.45)
 
                 // ═══ Quick Buttons ═══
                 Flow {
                     Layout.fillWidth: true
-                    spacing: Math.round(_sp * 0.25)
+                    spacing: Math.round(_sp * 0.3)
 
                     Repeater {
                         model: [
@@ -473,7 +484,7 @@ Rectangle {
                         ]
                         delegate: Rectangle {
                             width: chipLbl.implicitWidth + Math.round(_sp * 1.4)
-                            height: Math.round(_sp * 2.2)
+                            height: Math.round(_sp * 2.15)
                             radius: height / 2
                             color: qbEnabled ? (qbHover.hovered ? Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.12) : Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.05)) : _bgDark
                             border { color: qbEnabled ? (qbHover.hovered ? _accentCyan : Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.25)) : _borderDim; width: 1 }
@@ -481,7 +492,7 @@ Rectangle {
                             Text {
                                 id: chipLbl; anchors.centerIn: parent; text: modelData.label
                                 color: parent.qbEnabled ? _textPrimary : _textDim
-                                font.pixelSize: Math.round(_sp * 0.9)
+                                font.pixelSize: _fontCaption
                             }
                             MouseArea {
                                 anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
@@ -522,7 +533,9 @@ Rectangle {
 
                     ListView {
                         id: chatView
-                        anchors.fill: parent; anchors.margins: Math.round(_sp * 0.5)
+                        anchors.fill: parent
+                        anchors.leftMargin: Math.round(_sp * 0.15)
+                        anchors.rightMargin: Math.round(_sp * 0.15)
                         model: ListModel { id: chatModel }
                         spacing: Math.round(_sp * 0.35); clip: true
 
@@ -547,7 +560,7 @@ Rectangle {
                             width: chatView.width
                             height: msgCol.height + Math.round(_sp * 0.6)
 
-                            readonly property real _maxContentWidth: chatView.width - Math.round(_sp * 3.6)
+                            readonly property real _maxContentWidth: Math.min(chatView.width - Math.round(_sp * 3.4), chatView.width * 0.82)
                             readonly property bool _isUser: model.role === "user"
                             readonly property bool _isThinking: model.role === "thinking"
                             readonly property bool _isSystem: model.role === "system"
@@ -569,7 +582,12 @@ Rectangle {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     spacing: Math.round(_sp * 0.4)
-                                    layoutDirection: msgDelegate._isUser ? Qt.RightToLeft : Qt.LeftToRight
+
+                                    // Spacer: pushes avatar + content to the right for user messages
+                                    Item {
+                                        Layout.fillWidth: true
+                                        visible: msgDelegate._isUser
+                                    }
 
                                     // Avatar
                                     Rectangle {
@@ -640,14 +658,14 @@ Rectangle {
                                                 color: msgDelegate._isUser ? qgcPal.buttonText
                                                      : msgDelegate._isThinking ? msgDelegate._roleColor
                                                      : _textPrimary
-                                                font.pixelSize: msgDelegate._isThinking ? Math.round(_sp * 0.9) : Math.round(_sp * 1.05)
+                                                font.pixelSize: msgDelegate._isThinking ? _fontCaption : _fontBody
                                                 wrapMode: Text.Wrap
                                                 textFormat: msgDelegate._isThinking
                                                     ? Text.PlainText
                                                     : model.role === "streaming"
                                                     ? Text.PlainText  // Avoid expensive Markdown re-parse on every token
                                                     : Text.MarkdownText
-                                                lineHeight: 1.35
+                                                lineHeight: 1.28
                                             }
 
                                             MouseArea {
@@ -664,7 +682,7 @@ Rectangle {
                                         RowLayout {
                                             spacing: Math.round(_sp * 0.2)
                                             visible: !msgDelegate._isThinking && (model.content || "").length > 0
-                                            layoutDirection: msgDelegate._isUser ? Qt.RightToLeft : Qt.LeftToRight
+                                            Layout.alignment: msgDelegate._isUser ? Qt.AlignRight : Qt.AlignLeft
                                             Rectangle {
                                                 width: actCopyLbl.implicitWidth + Math.round(_sp * 0.9)
                                                 height: Math.round(_sp * 1.6)
@@ -698,13 +716,13 @@ Rectangle {
                             }
                             Text {
                                 text: "有什么可以帮你？"
-                                color: _textPrimary; font { pixelSize: Math.round(_sp * 1.4); bold: true }
+                                color: _textPrimary; font { pixelSize: _fontTitle; bold: true }
                                 horizontalAlignment: Text.AlignHCenter
                                 anchors.horizontalCenter: parent.horizontalCenter
                             }
                             Text {
                                 text: "飞行诊断 · 日志分析 · 参数调整 · 任务规划"
-                                color: _textDim; font.pixelSize: Math.round(_sp * 0.95)
+                                color: _textDim; font.pixelSize: _fontCaption
                                 horizontalAlignment: Text.AlignHCenter
                                 anchors.horizontalCenter: parent.horizontalCenter
                             }
@@ -763,10 +781,10 @@ Rectangle {
                     Behavior on height { NumberAnimation { duration: 150 } }
                 }
 
-                // ═══ Autonomous Mode Toggle ═══
+                // ═══ Compact mode/status row ═══
                 Rectangle {
                     Layout.fillWidth: true
-                    height: Math.round(_sp * 3.0)
+                    Layout.preferredHeight: Math.round(_sp * 2.4)
                     radius: Math.round(_sp * 0.35)
                     visible: _agentOK
                     color: _agentAuto ? Qt.rgba(_accentOrange.r, _accentOrange.g, _accentOrange.b, 0.08) : _bgDark
@@ -777,9 +795,9 @@ Rectangle {
                         spacing: Math.round(_sp * 0.4)
 
                         Text {
-                            text: _agentAuto ? "◉ Autonomous" : "○ Manual"
+                            text: _agentAuto ? "◉ 自主模式" : "○ 手动模式"
                             color: _agentAuto ? _accentOrange : _textDim
-                            font.pixelSize: Math.round(_sp * 1.0)
+                            font.pixelSize: _fontBody
                             font.weight: Font.Medium
                             Layout.fillWidth: true
                             verticalAlignment: Text.AlignVCenter
@@ -805,7 +823,7 @@ Rectangle {
                             Text {
                                 id: tokText
                                 anchors.centerIn: parent
-                                text: _agentOK && _agentMgr ? (_agentMgr.totalTokens / 1000).toFixed(1) + "K tokens" : ""
+                                text: _agentOK && _agentMgr ? (_agentMgr.totalTokens / 1000).toFixed(1) + "K Token" : ""
                                 color: _accentCyan
                                 font.pixelSize: Math.round(_sp * 0.8)
                                 font.weight: Font.Medium
@@ -835,10 +853,10 @@ Rectangle {
                             top: parent.top; bottom: parent.bottom
                             leftMargin: Math.round(_sp * 0.8); rightMargin: Math.round(_sp * 0.3)
                         }
-                        font.pixelSize: Math.round(_sp * 1.05)
-                        placeholderText: !_agentOK ? "Agent not configured..."
-                                       : _agentAuto ? "Autonomous mode — commands execute without confirmation"
-                                       : "Type a message..."
+                        font.pixelSize: _fontBody
+                        placeholderText: !_agentOK ? "Agent 未配置..."
+                                       : _agentAuto ? "自主模式 — 指令直接执行"
+                                       : "输入问题或指令..."
                         enabled: _agentOK && !_agentBusy
                         verticalAlignment: TextInput.AlignVCenter
                         onAccepted: _doSend()
@@ -873,6 +891,13 @@ Rectangle {
                         }
                         HoverHandler { id: sendHover; enabled: parent.sendBtnEnabled && !_agentBusy }
                     }
+
+                    // Block wheel events from propagating to the map (prevents map zoom when scrolling inside input)
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.NoButton  // let mouse clicks pass through to TextField
+                        onWheel: function(wheel) { wheel.accepted = true }
+                    }
                 }
 
                 // ═══ Bottom controls (JARVIS-style button row) ═══
@@ -881,21 +906,21 @@ Rectangle {
 
                     Repeater {
                         model: [
-                            { label: _agentAuto ? "◉ AUTO" : "○ AUTO", active: _agentAuto, action: "auto" },
+                            { label: _agentAuto ? "◉ 自主" : "○ 自主", active: _agentAuto, action: "auto" },
                             { label: "✕ 清空", active: false, action: "clear" },
-                            { label: "📋 复制", active: false, action: "copyAll" }
+                            { label: "📋 复制全部", active: false, action: "copyAll" }
                         ]
                         Rectangle {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: Math.round(_sp * 2.8)
-                            Layout.minimumHeight: Math.round(_sp * 2.8)
+                            Layout.preferredHeight: _controlHeight
+                            Layout.minimumHeight: _controlHeight
                             radius: Math.round(_sp * 0.3)
                             color: modelData.active ? Qt.rgba(_accentCyan.r, _accentCyan.g, _accentCyan.b, 0.08) : "transparent"
                             border.color: modelData.active ? _accentCyan : _borderDim; border.width: 1
                             Text {
                                 anchors.centerIn: parent; text: modelData.label
                                 color: modelData.active ? _accentCyan : _textDim
-                                font { pixelSize: Math.round(_sp * 0.9); bold: true }
+                                font { pixelSize: _fontCaption; bold: true }
                             }
                             MouseArea {
                                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
@@ -928,19 +953,19 @@ Rectangle {
             // ──────────── TAB 1: DIAGNOSTICS ────────────
             Flickable {
                 contentWidth: width
-                contentHeight: diagCol.implicitHeight
+                contentHeight: diagCol.implicitHeight + _pageMargin
                 clip: true; flickableDirection: Flickable.VerticalFlick
                 boundsBehavior: Flickable.StopAtBounds
 
                 ColumnLayout {
                     id: diagCol
-                    width: parent.width
+                    width: parent.width - _pageMargin
                     spacing: Math.round(_sp * 0.6)
 
                     Text {
                         text: "◉ 飞行器诊断"
                         color: _accentCyan
-                        font { pixelSize: Math.round(_sp * 1.1); bold: true }
+                        font { pixelSize: _fontSection; bold: true }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: _borderDim }
 
@@ -1003,11 +1028,11 @@ Rectangle {
                             anchors { fill: parent; margins: Math.round(_sp * 0.7) }
                             spacing: Math.round(_sp * 0.3)
                             Text { text: "AI Agent"; color: _textDim; font { pixelSize: Math.round(_sp * 0.75); bold: true } }
-                            Text { text: "Status: " + (_agentBusy ? "Processing" : _agentOK ? "Ready" : "Not Configured")
+                            Text { text: "状态: " + (_agentBusy ? "处理中" : _agentOK ? "就绪" : "未配置")
                                 color: _agentBusy ? _accentOrange : _agentOK ? _accentGreen : _accentRed
                                 font.pixelSize: _sp }
-                            Text { text: "Mode: " + (_agentAuto ? "Autonomous" : "Manual"); color: _textPrimary; font.pixelSize: _sp; visible: _agentOK }
-                            Text { text: "Tokens: " + (_agentOK && _agentMgr ? (_agentMgr.totalTokens / 1000).toFixed(1) + "K" : "0"); color: _textPrimary; font.pixelSize: _sp; visible: _agentOK }
+                            Text { text: "模式: " + (_agentAuto ? "自主" : "手动"); color: _textPrimary; font.pixelSize: _sp; visible: _agentOK }
+                            Text { text: "Token: " + (_agentOK && _agentMgr ? (_agentMgr.totalTokens / 1000).toFixed(1) + "K" : "0"); color: _textPrimary; font.pixelSize: _sp; visible: _agentOK }
                         }
                     }
 
@@ -1033,13 +1058,13 @@ Rectangle {
             // ──────────── TAB 3: SETTINGS ────────────
             Flickable {
                 contentWidth: width
-                contentHeight: settingsCol.implicitHeight
+                contentHeight: settingsCol.implicitHeight + _pageMargin
                 clip: true; flickableDirection: Flickable.VerticalFlick
                 boundsBehavior: Flickable.StopAtBounds
 
                 ColumnLayout {
                     id: settingsCol
-                    width: parent.width
+                    width: parent.width - _pageMargin
                     spacing: Math.round(_sp * 0.6)
 
                     // ── Header + connection status ──
@@ -1048,7 +1073,7 @@ Rectangle {
                         Text {
                             text: "⚙ API 设置"
                             color: _accentCyan
-                            font { pixelSize: Math.round(_sp * 1.1); bold: true }
+                            font { pixelSize: _fontSection; bold: true }
                         }
                         Item { Layout.fillWidth: true }
                         // Connection status indicator
@@ -1663,12 +1688,12 @@ Rectangle {
                     Layout.fillWidth: true; spacing: Math.round(_sp * 0.4)
 
                     Text {
-                        text: "Chat Archives"
+                        text: "聊天归档"
                         color: _textPrimary; font { pixelSize: _sp; bold: true }
                     }
                     Item { Layout.fillWidth: true }
                     Text {
-                        text: _agentOK ? (_agentMgr.archiveCount() + " archived") : "0 archived"
+                        text: _agentOK ? (_agentMgr.archiveCount() + " 已归档") : "0 已归档"
                         color: _textDim; font.pixelSize: Math.round(_sp * 0.8)
                     }
 
@@ -1681,7 +1706,7 @@ Rectangle {
                         border { color: _accentCyan; width: 1 }
                         Text {
                             id: archiveBtn; anchors.centerIn: parent
-                            text: "📦 Archive Current"; color: _accentCyan
+                            text: "📦 归档当前"; color: _accentCyan
                             font { pixelSize: Math.round(_sp * 0.85); bold: true }
                         }
                         MouseArea {
@@ -1753,7 +1778,7 @@ Rectangle {
                                         }
                                         Item { Layout.fillWidth: true }
                                         Text {
-                                            text: modelData.messageCount + " msgs"
+                                            text: modelData.messageCount + " 条消息"
                                             color: _textDim; font.pixelSize: Math.round(_sp * 0.75)
                                         }
 
@@ -1807,7 +1832,7 @@ Rectangle {
                             Text {
                                 anchors.centerIn: parent
                                 visible: archiveList.count === 0
-                                text: "No archived chats.\nClick 'Archive Current' to save."
+                                text: "暂无归档聊天。\n点击「归档当前」保存。"
                                 color: _textDim; font.pixelSize: _sp
                                 horizontalAlignment: Text.AlignHCenter
                             }
@@ -1846,7 +1871,7 @@ Rectangle {
                             }
 
                             Text {
-                                text: "Viewing Archive"
+                                text: "查看归档"
                                 color: _textPrimary; font { pixelSize: _sp; bold: true }
                             }
                             Item { Layout.fillWidth: true }

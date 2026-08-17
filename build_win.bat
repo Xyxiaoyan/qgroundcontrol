@@ -18,11 +18,13 @@ echo [OK] Proxy set to http://127.0.0.1:2334, pip mirror: Tsinghua
 
 rem --- Git (required by CMake FetchContent/CPM) ---
 rem Use junction C:\git to avoid spaces in path (CPM/ExternalProject issue)
-set "GIT_DIR=C:\git\cmd"
-if not exist "%GIT_DIR%\git.exe" set "GIT_DIR=C:\Program Files\Git\cmd"
-if exist "%GIT_DIR%\git.exe" (
-    set "PATH=%GIT_DIR%;%PATH%"
-    echo [OK] Git added to PATH
+rem NOTE: Do NOT use GIT_DIR as variable name - it conflicts with git's own env var
+set "GIT_BIN=C:\git\cmd"
+if not exist "%GIT_BIN%\git.exe" set "GIT_BIN=C:\Program Files\Git\cmd"
+if exist "%GIT_BIN%\git.exe" (
+    set "PATH=%GIT_BIN%;%PATH%"
+    set "GIT_EXECUTABLE=%GIT_BIN%\git.exe"
+    echo [OK] Git added to PATH: %GIT_BIN%
 ) else (
     echo [WARN] Git not found
 )
@@ -61,15 +63,25 @@ if not exist "%SRC_DIR%\CMakeLists.txt" (
 cd /d "%SRC_DIR%"
 echo [OK] Source: %SRC_DIR%
 
+rem --- Build Directory (inside project for easy access) ---
+set "BUILD_DIR=%SRC_DIR%\build"
+set "CONFIG_TYPE=Debug"
+echo [OK] Build dir: %BUILD_DIR%
+
 rem --- Parse argument ---
 set "ACTION=%~1"
 if "%ACTION%"=="" set "ACTION=configure"
 
 rem --- Configure ---
 if /i "%ACTION%"=="configure" (
+    if /i "%~2"=="Release" set "CONFIG_TYPE=Release"
     echo.
-    echo ======== CMake Configure ========
-    cmake --preset Windows -B "%USERPROFILE%\qgc-build" -DQGC_USE_CACHE=OFF -DGIT_EXECUTABLE="C:/git/cmd/git.exe"
+    echo ======== CMake Configure (!CONFIG_TYPE!) ========
+    cmake -G Ninja -B "%BUILD_DIR%" ^
+        -DCMAKE_BUILD_TYPE=!CONFIG_TYPE! ^
+        -DCMAKE_TOOLCHAIN_FILE="%QT_ROOT_DIR%\lib\cmake\Qt6\qt.toolchain.cmake" ^
+        -DQGC_USE_CACHE=OFF ^
+        -DGIT_EXECUTABLE="C:/git/cmd/git.exe"
     if errorlevel 1 (
         echo [FAILED] CMake configure failed
         exit /b 1
@@ -82,9 +94,22 @@ rem --- Build ---
 if /i "%ACTION%"=="build" (
     set "CONFIG=%~2"
     if "!CONFIG!"=="" set "CONFIG=Debug"
+    rem Auto-configure if build directory missing
+    if not exist "%BUILD_DIR%\CMakeCache.txt" (
+        echo [WARN] Build directory not configured, running configure first...
+        cmake -G Ninja -B "%BUILD_DIR%" ^
+            -DCMAKE_BUILD_TYPE=!CONFIG! ^
+            -DCMAKE_TOOLCHAIN_FILE="%QT_ROOT_DIR%\lib\cmake\Qt6\qt.toolchain.cmake" ^
+            -DQGC_USE_CACHE=OFF ^
+            -DGIT_EXECUTABLE="C:/git/cmd/git.exe"
+        if errorlevel 1 (
+            echo [FAILED] CMake configure failed
+            exit /b 1
+        )
+    )
     echo.
     echo ======== CMake Build !CONFIG! ========
-    cmake --build "%USERPROFILE%\qgc-build" --config !CONFIG! --parallel
+    cmake --build "%BUILD_DIR%" --parallel
     if errorlevel 1 (
         echo [FAILED] Build failed
         exit /b 1
@@ -95,9 +120,24 @@ if /i "%ACTION%"=="build" (
 
 rem --- Build Release ---
 if /i "%ACTION%"=="release" (
+    rem Release needs its own build directory
+    set "BUILD_DIR=%SRC_DIR%\build-release"
+    rem Auto-configure if build directory missing
+    if not exist "%BUILD_DIR%\CMakeCache.txt" (
+        echo [WARN] Release build directory not configured, running configure first...
+        cmake -G Ninja -B "%BUILD_DIR%" ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_TOOLCHAIN_FILE="%QT_ROOT_DIR%\lib\cmake\Qt6\qt.toolchain.cmake" ^
+            -DQGC_USE_CACHE=OFF ^
+            -DGIT_EXECUTABLE="C:/git/cmd/git.exe"
+        if errorlevel 1 (
+            echo [FAILED] CMake configure failed
+            exit /b 1
+        )
+    )
     echo.
     echo ======== CMake Build Release ========
-    cmake --build "%USERPROFILE%\qgc-build" --config Release --parallel
+    cmake --build "%BUILD_DIR%" --parallel
     if errorlevel 1 (
         echo [FAILED] Release build failed
         exit /b 1
@@ -109,12 +149,46 @@ if /i "%ACTION%"=="release" (
 rem --- Clean ---
 if /i "%ACTION%"=="clean" (
     echo ======== Cleaning ========
-    if exist "%USERPROFILE%\qgc-build" rmdir /s /q "%USERPROFILE%\qgc-build"
+    if exist "%SRC_DIR%\build" rmdir /s /q "%SRC_DIR%\build"
+    if exist "%SRC_DIR%\build-release" rmdir /s /q "%SRC_DIR%\build-release"
     echo [OK] Clean complete
     goto :end
 )
 
-echo Usage: build_win.bat [configure^|build [Debug^|Release]^|release^|clean]
+rem --- Deploy DLLs (Qt + GStreamer) ---
+if /i "%ACTION%"=="deploy" (
+    set "CONFIG=%~2"
+    if "!CONFIG!"=="" set "CONFIG=Debug"
+    if /i "!CONFIG!"=="Release" (
+        set "DEPLOY_DIR=%SRC_DIR%\build-release"
+    ) else (
+        set "DEPLOY_DIR=%SRC_DIR%\build\Debug"
+    )
+    if not exist "!DEPLOY_DIR!\AgentQGC.exe" (
+        echo [ERROR] AgentQGC.exe not found in !DEPLOY_DIR!
+        echo Run 'build_win.bat build' first.
+        exit /b 1
+    )
+    echo ======== Deploying DLLs to !DEPLOY_DIR! ========
+    rem Qt DLLs + QML modules + plugins
+    "%QT_ROOT_DIR%\bin\windeployqt.exe" --debug --qmldir "%SRC_DIR%\build\qml" "!DEPLOY_DIR!\AgentQGC.exe"
+    if errorlevel 1 (
+        echo [WARN] windeployqt reported warnings
+    )
+    rem GStreamer DLLs
+    set "GS_BIN=%SRC_DIR%\.cache\CPM\gstreamer-win-x86_64-1.28.1\sdk\bin"
+    if exist "!GS_BIN!\*.dll" (
+        echo Copying GStreamer DLLs...
+        copy /Y "!GS_BIN!\*.dll" "!DEPLOY_DIR!\" >nul 2>&1
+        echo [OK] GStreamer DLLs copied
+    ) else (
+        echo [WARN] GStreamer DLLs not found at !GS_BIN!
+    )
+    echo [OK] Deploy complete: !DEPLOY_DIR!
+    goto :end
+)
+
+echo Usage: build_win.bat [configure [Release]^|build [Debug]^|release^|clean^|deploy [Debug^|Release]]
 
 :end
 endlocal
