@@ -23,6 +23,7 @@ public:
                               const QJsonArray &tools, bool stream = false);
     void sendVisionRequest(const QString &endpoint, const QString &apiKey, const QString &model,
                            const QString &prompt, const QString &imageBase64);
+    void testConnection(const QString &endpoint, const QString &apiKey, const QString &model);
     void fetchModels(const QString &endpoint, const QString &apiKey);
     void cancelRequest();
 
@@ -36,6 +37,7 @@ signals:
     void streamChunk(const QString &text);
     void thinkingChunk(const QString &text);
     void requestError(const QString &error);
+    void connectionTestSucceeded();
     void modelsFetched(const QJsonArray &models);
 
 private slots:

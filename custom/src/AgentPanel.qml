@@ -120,12 +120,12 @@ Rectangle {
 
     // ═══ Provider presets ═══
     readonly property var _providerPresets: ({
-        "DeepSeek":                { baseUrl: "https://api.deepseek.com/v1",                     defaultModel: "deepseek-chat",      keyHint: "sk-xxxxxxxxxxxxxxxx" },
-        "DashScope (通义千问)":    { baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus",           keyHint: "sk-xxxxxxxxxxxxxxxx" },
-        "智谱GLM":                 { baseUrl: "https://open.bigmodel.cn/api/paas/v4",             defaultModel: "glm-4-flash",         keyHint: "xxxxxxxxxxxxxxxx.xxxxxx" },
-        "OpenAI":                  { baseUrl: "https://api.openai.com/v1",                        defaultModel: "gpt-4o-mini",         keyHint: "sk-xxxxxxxxxxxxxxxx" },
-        "Ollama (本地)":           { baseUrl: "http://localhost:11434/v1",                        defaultModel: "llama3",              keyHint: "ollama (无需Key)" },
-        "自定义":                  { baseUrl: "",                                                  defaultModel: "",                    keyHint: "" }
+        "DeepSeek":                { baseUrl: "https://api.deepseek.com/v1/chat/completions",                       defaultModel: "deepseek-chat", keyHint: "sk-xxxxxxxxxxxxxxxx" },
+        "DashScope (通义千问)":    { baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", defaultModel: "qwen-plus",      keyHint: "sk-xxxxxxxxxxxxxxxx" },
+        "智谱GLM":                 { baseUrl: "https://open.bigmodel.cn/api/paas/v4/chat/completions",              defaultModel: "glm-4-flash",    keyHint: "xxxxxxxxxxxxxxxx.xxxxxx" },
+        "OpenAI":                  { baseUrl: "https://api.openai.com/v1/chat/completions",                         defaultModel: "gpt-4o-mini",    keyHint: "sk-xxxxxxxxxxxxxxxx" },
+        "Ollama (本地)":           { baseUrl: "http://localhost:11434/v1/chat/completions",                         defaultModel: "llama3",         keyHint: "ollama (无需Key)" },
+        "自定义":                  { baseUrl: "",                                                                    defaultModel: "",               keyHint: "" }
     })
 
     function _detectProviderIndex() {
@@ -148,17 +148,11 @@ Rectangle {
             if (_agentMgr) _agentMgr.setApiEndpoint(preset.baseUrl)
         }
         if (preset.defaultModel.length > 0) {
-            modelCombo.editText = preset.defaultModel
+            modelNameField.text = preset.defaultModel
             if (_agentMgr) _agentMgr.setModelName(preset.defaultModel)
         }
         if (preset.keyHint.length > 0) {
             apiKeyField.placeholderText = preset.keyHint
-        }
-        // Auto-fetch models when provider changes (if key is set)
-        if (_agentMgr && baseUrlField.text.length > 0 && apiKeyField.text.length > 0) {
-            _agentMgr.setApiKey(apiKeyField.text)
-            _agentMgr.setApiEndpoint(baseUrlField.text)
-            _agentMgr.fetchModels()
         }
     }
 
@@ -1225,7 +1219,7 @@ Rectangle {
                                     id: baseUrlField
                                     Layout.fillWidth: true
                                     font.pixelSize: Math.round(_sp * 0.95)
-                                    placeholderText: "https://api.deepseek.com/v1"
+                                    placeholderText: "https://api.deepseek.com/v1/chat/completions"
                                     selectByMouse: true
                                     Component.onCompleted: { if (_agentOK) text = _agentMgr.baseApiEndpoint() }
                                     onEditingFinished: { if (_agentMgr) _agentMgr.setApiEndpoint(text) }
@@ -1258,6 +1252,7 @@ Rectangle {
                                             if (_agentMgr) {
                                                 _agentMgr.setApiKey(apiKeyField.text)
                                                 _agentMgr.setApiEndpoint(baseUrlField.text)
+                                                _agentMgr.setModelName(modelNameField.text.trim())
                                                 _agentMgr.testConnection()
                                             }
                                         }
@@ -1267,7 +1262,7 @@ Rectangle {
                             }
                             Text {
                                 Layout.fillWidth: true; font.pixelSize: Math.round(_sp * 0.7); color: _textDim
-                                text: "只需输入到 /v1 或域名，自动拼接 /chat/completions"
+                                text: "请输入完整 API 地址；程序将原样使用，不会自动拼接路径"
                                 wrapMode: Text.Wrap
                             }
                         }
@@ -1291,38 +1286,59 @@ Rectangle {
                                 font.pixelSize: Math.round(_sp * 0.75)
                                 font.capitalization: Font.AllUppercase
                             }
-                            ComboBox {
-                                id: modelCombo
+                            TextField {
+                                id: modelNameField
                                 Layout.fillWidth: true
-                                editable: true
-                                model: _fetchedModels
-                                onModelChanged: {
-                                    if (_agentMgr && _fetchedModels.length > 0) {
-                                        var m = _agentMgr.modelName
-                                        for (var i = 0; i < _fetchedModels.length; i++) {
-                                            if (_fetchedModels[i] === m) { currentIndex = i; return }
-                                        }
-                                        currentIndex = -1; editText = m
+                                selectByMouse: true
+                                placeholderText: "输入模型名称，例如 deepseek-chat"
+                                Component.onCompleted: {
+                                    if (_agentMgr) text = _agentMgr.modelName
+                                }
+                                onEditingFinished: {
+                                    var model = text.trim()
+                                    if (_agentMgr && model.length > 0) {
+                                        text = model
+                                        _agentMgr.setModelName(model)
                                     }
                                 }
-                                Component.onCompleted: { if (_agentMgr) editText = _agentMgr.modelName }
-                                onActivated: { if (_agentMgr && currentText.length > 0) _agentMgr.setModelName(currentText) }
-                                onAccepted: { if (_agentMgr && editText.length > 0) _agentMgr.setModelName(editText) }
+                                background: Rectangle {
+                                    radius: Math.round(_sp * 0.3); color: _bgDark
+                                    border { color: _borderDim; width: 1 }
+                                }
+                                color: _textPrimary
+                                placeholderTextColor: _textDim
+                                font.pixelSize: Math.round(_sp * 1.1)
+                            }
+                            ComboBox {
+                                id: fetchedModelCombo
+                                Layout.fillWidth: true
+                                visible: _fetchedModels.length > 0
+                                model: _fetchedModels
+                                currentIndex: -1
+                                displayText: currentIndex >= 0 ? currentText : "从已获取列表中选择模型"
+                                onActivated: {
+                                    if (currentText.length > 0) {
+                                        modelNameField.text = currentText
+                                        if (_agentMgr) _agentMgr.setModelName(currentText)
+                                    }
+                                }
                                 background: Rectangle {
                                     radius: Math.round(_sp * 0.3); color: _bgDark
                                     border { color: _borderDim; width: 1 }
                                 }
                                 contentItem: Text {
-                                    text: parent.displayText; color: qgcPal.buttonText
+                                    text: fetchedModelCombo.displayText
+                                    color: qgcPal.buttonText
                                     font.pixelSize: Math.round(_sp * 1.1)
-                                    verticalAlignment: Text.AlignVCenter; leftPadding: Math.round(_sp * 0.6)
+                                    verticalAlignment: Text.AlignVCenter
+                                    leftPadding: Math.round(_sp * 0.6)
                                 }
                             }
                             Text {
                                 font.pixelSize: Math.round(_sp * 0.7); color: _textDim
                                 text: _fetchedModels.length > 0
                                     ? "已获取 " + _fetchedModels.length + " 个模型，也可手动输入"
-                                    : "点击「测试连接」获取可用模型，或直接输入模型名"
+                                    : "输入模型名；测试连接将直接验证上方完整 API 地址"
                             }
                         }
                     }
@@ -1384,7 +1400,7 @@ Rectangle {
                                 if (_agentMgr) {
                                     _agentMgr.setApiKey(apiKeyField.text)
                                     _agentMgr.setApiEndpoint(baseUrlField.text)
-                                    _agentMgr.setModelName(modelCombo.editText)
+                                    _agentMgr.setModelName(modelNameField.text.trim())
                                     _agentMgr.setGeocodeApiKey(geocodeKeyField.text)
                                 }
                                 currentTab = 0

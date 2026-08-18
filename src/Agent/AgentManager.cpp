@@ -39,7 +39,6 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
-#include <QtCore/QRegularExpression>
 #include <QtCore/QDateTime>
 
 QGC_LOGGING_CATEGORY(AgentManagerLog, "qgc.agent")
@@ -103,6 +102,14 @@ AgentManager::AgentManager(QObject *parent)
         emit connectionStatusChanged();
         emit modelsFetched(models);
     });
+    connect(_llm, &LLMClient::connectionTestSucceeded,    this, [this]() {
+        _connectionStatus = StatusConnected;
+        _statusText = QStringLiteral("Connected");
+        _errorMessage.clear();
+        emit connectionStatusChanged();
+        emit statusTextChanged();
+        emit errorMessageChanged();
+    });
     connect(_llm, &LLMClient::requestError,              this, [this](const QString &err) {
         if (_connectionStatus == StatusConnecting) {
             _connectionStatus = StatusFailed;
@@ -112,7 +119,7 @@ AgentManager::AgentManager(QObject *parent)
         emit errorMessageChanged();
     });
 
-    // Load persisted config (normalize endpoint on load)
+    // Load persisted config
     _apiKey = _config->apiKey();
     _modelName = _config->modelName();
     QString savedEndpoint = _config->apiEndpoint();
@@ -166,54 +173,7 @@ void AgentManager::setApiKey(const QString &key)
 
 void AgentManager::setApiEndpoint(const QString &url)
 {
-    QString normalized = url.trimmed();
-    if (normalized.isEmpty()) {
-        if (_apiEndpoint != normalized) {
-            _apiEndpoint = normalized;
-            _config->setApiEndpoint(normalized);
-            _reactLoop->setApiEndpoint(normalized);
-            emit apiEndpointChanged();
-        }
-        return;
-    }
-
-    // Remove trailing slash
-    while (normalized.endsWith(QStringLiteral("/"))) {
-        normalized.chop(1);
-    }
-
-    // Already fully qualified — deduplicate and accept
-    if (normalized.endsWith(QStringLiteral("/chat/completions"))) {
-        // Remove any duplicate suffix (e.g. .../v1/chat/completions/v1/chat/completions)
-        static const QStringList suffixes = {
-            QStringLiteral("/v1/chat/completions"),
-            QStringLiteral("/v4/chat/completions"),
-        };
-        for (const auto &suffix : suffixes) {
-            QString dup = suffix + suffix;
-            while (normalized.contains(dup)) {
-                normalized.replace(dup, suffix);
-            }
-        }
-        if (_apiEndpoint != normalized) {
-            _apiEndpoint = normalized;
-            _config->setApiEndpoint(normalized);
-            _reactLoop->setApiEndpoint(normalized);
-            emit apiEndpointChanged();
-        }
-        return;
-    }
-
-    // Base URL only — append /chat/completions
-    // Detect versioned base paths: /v1, /v4, /compatible-mode/v1, etc.
-    // Heuristic: if URL ends with /vN (N = digit), just append /chat/completions
-    static const QRegularExpression versionedRe(QStringLiteral("/v\\d+$"));
-    if (versionedRe.match(normalized).hasMatch()) {
-        normalized += QStringLiteral("/chat/completions");
-    } else {
-        // Default: append /v1/chat/completions
-        normalized += QStringLiteral("/v1/chat/completions");
-    }
+    const QString normalized = url.trimmed();
 
     if (_apiEndpoint != normalized) {
         _apiEndpoint = normalized;
@@ -225,12 +185,7 @@ void AgentManager::setApiEndpoint(const QString &url)
 
 QString AgentManager::baseApiEndpoint() const
 {
-    QString base = _apiEndpoint;
-    // Strip /chat/completions suffix (handles /v1, /v4, etc.)
-    if (base.endsWith(QStringLiteral("/chat/completions"))) {
-        base.chop(18);
-    }
-    return base;
+    return _apiEndpoint;
 }
 
 void AgentManager::setModelName(const QString &model)
@@ -459,7 +414,16 @@ void AgentManager::fetchModels()
 
 void AgentManager::testConnection()
 {
-    fetchModels();
+    if (_apiEndpoint.isEmpty() || _apiKey.isEmpty() || _modelName.isEmpty()) {
+        _errorMessage = QStringLiteral("Please set API URL, API Key, and model first");
+        emit errorMessageChanged();
+        return;
+    }
+    _statusText = QStringLiteral("Connecting...");
+    _connectionStatus = StatusConnecting;
+    emit statusTextChanged();
+    emit connectionStatusChanged();
+    _llm->testConnection(_apiEndpoint, _apiKey, _modelName);
 }
 
 void AgentManager::clearConversationHistory()

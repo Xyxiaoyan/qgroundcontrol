@@ -190,6 +190,40 @@ void LLMClient::sendVisionRequest(
     connect(_currentReply, &QNetworkReply::finished, this, &LLMClient::_onReplyFinished);
 }
 
+void LLMClient::testConnection(const QString &endpoint, const QString &apiKey, const QString &model)
+{
+    QJsonArray messages;
+    messages.append(QJsonObject{
+        {QStringLiteral("role"), QStringLiteral("user")},
+        {QStringLiteral("content"), QStringLiteral("Reply with OK only.")},
+    });
+
+    QJsonObject body;
+    body[QStringLiteral("model")] = model;
+    body[QStringLiteral("messages")] = messages;
+    body[QStringLiteral("stream")] = false;
+
+    QNetworkRequest request{QUrl(endpoint)};
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    request.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(apiKey).toUtf8());
+    request.setTransferTimeout(kTimeoutMs);
+
+    QNetworkReply *reply = _network->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QByteArray data = reply->readAll();
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool succeeded = statusCode >= 200 && statusCode < 300
+            && reply->error() == QNetworkReply::NoError;
+
+        if (succeeded) {
+            emit connectionTestSucceeded();
+        } else if (reply->error() != QNetworkReply::OperationCanceledError) {
+            emit requestError(_formatHttpError(statusCode, QString::fromUtf8(data), reply->error()));
+        }
+        reply->deleteLater();
+    });
+}
+
 void LLMClient::fetchModels(const QString &endpoint, const QString &apiKey)
 {
     // Derive models URL from chat completions endpoint
