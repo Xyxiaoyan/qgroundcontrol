@@ -320,8 +320,15 @@ Rectangle {
         }
     }
 
-    // ═══ Prevent click-through ═══
-    MouseArea { anchors.fill: parent; z: -1 }
+    // ═══ Prevent pointer events from reaching the map behind the panel ═══
+    // Scrollable children handle wheel events first. This background layer
+    // consumes any unhandled event (including at scroll boundaries), so it
+    // cannot fall through and zoom the map.
+    MouseArea {
+        anchors.fill: parent
+        z: -1
+        onWheel: function(wheel) { wheel.accepted = true }
+    }
 
     // ════════════════════════════════════════════════════
     //  Main Layout
